@@ -10,6 +10,10 @@
   --blue: #2f5d8c;
   --red: #b84938;
   --gold: #b7791f;
+  --teal: #007c89;
+  --lemon: #d6a600;
+  --coral: #cf4b3f;
+  --violet: #7655c7;
   --shadow: 0 18px 45px rgba(42, 31, 20, 0.12);
 }
 
@@ -220,6 +224,26 @@ button {
   background: var(--gold);
 }
 
+.pill.teal {
+  color: #fff;
+  background: var(--teal);
+}
+
+.pill.lemon {
+  color: #251f08;
+  background: #f2d54a;
+}
+
+.pill.coral {
+  color: #fff;
+  background: var(--coral);
+}
+
+.pill.violet {
+  color: #fff;
+  background: var(--violet);
+}
+
 .tab-panel {
   display: grid;
   gap: 12px;
@@ -255,6 +279,56 @@ button {
   gap: 6px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.card-action {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.card-action.add {
+  color: #fff;
+  background: var(--green);
+}
+
+.card-action.remove {
+  color: #fff;
+  background: var(--red);
+}
+
+.role-assignment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.role-assignment.teal {
+  color: #fff;
+  background: var(--teal);
+}
+
+.role-assignment.lemon {
+  color: #251f08;
+  background: #f2d54a;
+}
+
+.role-assignment.coral {
+  color: #fff;
+  background: var(--coral);
+}
+
+.role-assignment.violet {
+  color: #fff;
+  background: var(--violet);
 }
 
 .day-list,

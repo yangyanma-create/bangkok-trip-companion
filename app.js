@@ -2,15 +2,16 @@ const STORAGE_KEYS = {
   traveler: "bangkok-trip-traveler",
   expenses: "bangkok-trip-expenses",
   activeTab: "bangkok-trip-active-tab",
+  itineraryOverrides: "bangkok-trip-itinerary-overrides",
 };
 
 const BUDGET_LIMIT = 20000;
 
 const travelers = [
-  { id: "a", name: "旅伴 A", color: "green" },
-  { id: "b", name: "旅伴 B", color: "blue" },
-  { id: "c", name: "旅伴 C", color: "gold" },
-  { id: "d", name: "旅伴 D", color: "green" },
+  { id: "a", name: "液蠔", color: "teal" },
+  { id: "b", name: "🏠🍋", color: "lemon" },
+  { id: "c", name: "疣法", color: "coral" },
+  { id: "d", name: "🐎🐑", color: "violet" },
 ];
 
 const roles = [
@@ -283,6 +284,64 @@ function getPlace(id) {
   return places.find((place) => place.id === id);
 }
 
+function readItineraryOverrides() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.itineraryOverrides) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeItineraryOverrides(overrides) {
+  localStorage.setItem(STORAGE_KEYS.itineraryOverrides, JSON.stringify(overrides));
+}
+
+function uniqueIds(ids) {
+  return Array.from(new Set(ids));
+}
+
+function getDayPlan(dayIndex) {
+  const day = tripDays[dayIndex];
+  const overrides = readItineraryOverrides();
+  const dayOverride = overrides[day.date] || { added: [], removed: [] };
+  const added = dayOverride.added || [];
+  const removed = dayOverride.removed || [];
+  const plannedIds = uniqueIds([...day.planned, ...added]).filter((id) => !removed.includes(id));
+  const backupIds = uniqueIds([...day.backups, ...removed]).filter((id) => !plannedIds.includes(id));
+
+  return {
+    plannedIds,
+    backupIds,
+    plannedPlaces: plannedIds.map(getPlace).filter(Boolean),
+    backupPlaces: backupIds.map(getPlace).filter(Boolean),
+  };
+}
+
+function updateTodayPlan(placeId, action) {
+  const day = tripDays[getTodayIndex()];
+  const overrides = readItineraryOverrides();
+  const current = overrides[day.date] || { added: [], removed: [] };
+  const added = new Set(current.added || []);
+  const removed = new Set(current.removed || []);
+
+  if (action === "add") {
+    added.add(placeId);
+    removed.delete(placeId);
+  }
+
+  if (action === "remove") {
+    added.delete(placeId);
+    removed.add(placeId);
+  }
+
+  overrides[day.date] = {
+    added: Array.from(added),
+    removed: Array.from(removed),
+  };
+
+  writeItineraryOverrides(overrides);
+}
+
 function readExpenses() {
   try {
     const allExpenses = JSON.parse(localStorage.getItem(STORAGE_KEYS.expenses) || "{}");
@@ -375,6 +434,13 @@ function renderActiveTab() {
 }
 
 function placeCard(place) {
+  const actionHtml =
+    place.action === "add"
+      ? `<button class="card-action add" type="button" data-add-today="${place.id}">加入今日</button>`
+      : place.action === "remove"
+        ? `<button class="card-action remove" type="button" data-remove-today="${place.id}">從今日移除</button>`
+        : "";
+
   return `
     <article class="card">
       <div class="status-row">
@@ -389,6 +455,7 @@ function placeCard(place) {
         <span class="meta">${money(place.cost)}</span>
         <span class="meta">優先度 ${place.priority}</span>
       </div>
+      ${actionHtml}
     </article>
   `;
 }
@@ -400,8 +467,7 @@ function renderToday() {
   const travelerIndex = travelers.findIndex((item) => item.id === traveler.id);
   const role = getRoleFor(dayIndex, travelerIndex);
   const smokeRoll = getSmokeRollTraveler(dayIndex);
-  const plannedPlaces = day.planned.map(getPlace).filter(Boolean);
-  const backupPlaces = day.backups.map(getPlace).filter(Boolean);
+  const { plannedPlaces, backupPlaces } = getDayPlan(dayIndex);
   const dailyCost = [...plannedPlaces, ...backupPlaces].reduce((sum, place) => sum + place.cost, 0);
 
   return `
@@ -418,11 +484,19 @@ function renderToday() {
     </article>
     <h2 class="section-title">預排行程</h2>
     <div class="place-list">
-      ${plannedPlaces.length ? plannedPlaces.map(placeCard).join("") : `<div class="empty-state">這天還沒有排定正式行程，等大家收集完想去的地方後再放進來。</div>`}
+      ${
+        plannedPlaces.length
+          ? plannedPlaces.map((place) => placeCard({ ...place, status: "今日行程", action: "remove" })).join("")
+          : `<div class="empty-state">這天還沒有排定正式行程，等大家收集完想去的地方後再放進來。</div>`
+      }
     </div>
     <h2 class="section-title">候補選項</h2>
     <div class="place-list">
-      ${backupPlaces.length ? backupPlaces.map(placeCard).join("") : `<div class="empty-state">這天暫時沒有候補地點。</div>`}
+      ${
+        backupPlaces.length
+          ? backupPlaces.map((place) => placeCard({ ...place, status: "候補", action: "add" })).join("")
+          : `<div class="empty-state">這天暫時沒有候補地點。</div>`
+      }
     </div>
   `;
 }
@@ -432,9 +506,8 @@ function renderItinerary() {
     <h2 class="section-title">行程</h2>
     <div class="day-list">
       ${tripDays
-        .map((day) => {
-          const plannedPlaces = day.planned.map(getPlace).filter(Boolean);
-          const backupPlaces = day.backups.map(getPlace).filter(Boolean);
+        .map((day, dayIndex) => {
+          const { plannedPlaces, backupPlaces } = getDayPlan(dayIndex);
           const estimatedCost = [...plannedPlaces, ...backupPlaces].reduce((sum, place) => sum + place.cost, 0);
           return `
             <article class="card">
@@ -465,6 +538,8 @@ function renderItinerary() {
 function renderCandidates() {
   const types = ["全部", ...Array.from(new Set(places.map((place) => place.type)))];
   const priorities = ["全部", ...Array.from(new Set(places.map((place) => place.priority)))];
+  const todayPlan = getDayPlan(getTodayIndex());
+  const todayPlannedIds = new Set(todayPlan.plannedIds);
   const filteredPlaces = places.filter((place) => {
     const typeMatch = state.filters.type === "全部" || place.type === state.filters.type;
     const priorityMatch = state.filters.priority === "全部" || place.priority === state.filters.priority;
@@ -488,7 +563,19 @@ function renderCandidates() {
       </label>
     </div>
     <div class="place-list">
-      ${filteredPlaces.length ? filteredPlaces.map(placeCard).join("") : `<div class="empty-state">目前沒有符合條件的候補地點。</div>`}
+      ${
+        filteredPlaces.length
+          ? filteredPlaces
+              .map((place) =>
+                placeCard({
+                  ...place,
+                  status: todayPlannedIds.has(place.id) ? "今日行程" : place.status,
+                  action: todayPlannedIds.has(place.id) ? "remove" : "add",
+                }),
+              )
+              .join("")
+          : `<div class="empty-state">目前沒有符合條件的候補地點。</div>`
+      }
     </div>
   `;
 }
@@ -575,38 +662,35 @@ function expenseCard(expense) {
 }
 
 function renderRoles() {
+  const dayIndex = getTodayIndex();
+  const day = tripDays[dayIndex];
+  const smokeRoll = getSmokeRollTraveler(dayIndex);
+
   return `
-    <h2 class="section-title">角色</h2>
+    <h2 class="section-title">今日角色</h2>
     <div class="role-list">
-      ${tripDays
-        .map((day, dayIndex) => {
-          const smokeRoll = getSmokeRollTraveler(dayIndex);
-          return `
-            <article class="card">
-              <div class="status-row">
-                <div>
-                  <p class="eyebrow">${day.date}</p>
-                  <h3>${day.label}</h3>
+      <article class="card">
+        <div class="status-row">
+          <div>
+            <p class="eyebrow">${day.date}</p>
+            <h3>${day.label}</h3>
+          </div>
+          <span class="pill gold">煙捲：${smokeRoll.name}</span>
+        </div>
+        <div class="place-list">
+          ${travelers
+            .map((traveler, travelerIndex) => {
+              const role = getRoleFor(dayIndex, travelerIndex);
+              return `
+                <div class="role-assignment ${traveler.color}">
+                  <span>${traveler.name}</span>
+                  <strong>${role.name}</strong>
                 </div>
-                <span class="pill gold">煙捲：${smokeRoll.name}</span>
-              </div>
-              <div class="place-list">
-                ${travelers
-                  .map((traveler, travelerIndex) => {
-                    const role = getRoleFor(dayIndex, travelerIndex);
-                    return `
-                      <div class="status-row">
-                        <span>${traveler.name}</span>
-                        <span class="pill ${traveler.color}">${role.name}</span>
-                      </div>
-                    `;
-                  })
-                  .join("")}
-              </div>
-            </article>
-          `;
-        })
-        .join("")}
+              `;
+            })
+            .join("")}
+        </div>
+      </article>
     </div>
   `;
 }
@@ -654,6 +738,22 @@ function bindTabEvents() {
     button.addEventListener("click", () => {
       const expenses = readExpenses().filter((expense) => expense.id !== button.dataset.deleteExpense);
       writeExpenses(expenses);
+      renderActiveTab();
+    });
+  });
+
+  document.querySelectorAll("[data-add-today]").forEach((button) => {
+    button.addEventListener("click", () => {
+      updateTodayPlan(button.dataset.addToday, "add");
+      renderTravelerStatus();
+      renderActiveTab();
+    });
+  });
+
+  document.querySelectorAll("[data-remove-today]").forEach((button) => {
+    button.addEventListener("click", () => {
+      updateTodayPlan(button.dataset.removeToday, "remove");
+      renderTravelerStatus();
       renderActiveTab();
     });
   });
