@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
   expenses: "bangkok-trip-expenses",
   activeTab: "bangkok-trip-active-tab",
   itineraryOverrides: "bangkok-trip-itinerary-overrides",
+  dailyRoleDraws: "bangkok-trip-daily-role-draws",
   clientId: "bangkok-trip-client-id",
 };
 
@@ -236,7 +237,7 @@ const state = {
   travelerId: localStorage.getItem(STORAGE_KEYS.traveler),
   activeTab: localStorage.getItem(STORAGE_KEYS.activeTab) || "today",
   editingExpenseId: null,
-  claims: {},
+  syncedDailyRoleDraws: null,
   syncedItineraryOverrides: null,
   syncStatus: "本機模式",
   syncMessage: "尚未設定 Firebase，多人同步尚未啟用。",
@@ -285,25 +286,8 @@ function getClientId() {
 
 const clientId = getClientId();
 
-function isClaimedByCurrentClient(travelerId) {
-  return state.claims[travelerId]?.clientId === clientId;
-}
-
-function isClaimedByOtherClient(travelerId) {
-  const claim = state.claims[travelerId];
-  return Boolean(claim && claim.clientId !== clientId);
-}
-
-function getAvailableTravelers() {
-  return travelers.filter((traveler) => !isClaimedByOtherClient(traveler.id));
-}
-
 function getTraveler() {
   return travelers.find((traveler) => traveler.id === state.travelerId) || travelers[0];
-}
-
-function getRoleFor(dayIndex, travelerIndex) {
-  return roles[(travelerIndex + dayIndex) % roles.length];
 }
 
 function getSmokeRollTraveler(dayIndex) {
@@ -321,6 +305,37 @@ function getTodayIndex() {
 
 function getPlace(id) {
   return places.find((place) => place.id === id);
+}
+
+function getRole(roleId) {
+  return roles.find((role) => role.id === roleId);
+}
+
+function readDailyRoleDraws() {
+  if (state.syncedDailyRoleDraws) {
+    return state.syncedDailyRoleDraws;
+  }
+
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEYS.dailyRoleDraws) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function getDailyRoleAssignments(dayIndex) {
+  const day = tripDays[dayIndex];
+  const draws = readDailyRoleDraws();
+  return draws[day.date] || {};
+}
+
+function getAssignedRoleForTraveler(travelerId, dayIndex) {
+  return getRole(getDailyRoleAssignments(dayIndex)[travelerId]);
+}
+
+function getAvailableRoles(dayIndex, assignments = getDailyRoleAssignments(dayIndex)) {
+  const usedRoleIds = new Set(Object.values(assignments).filter((value) => typeof value === "string"));
+  return roles.filter((role) => !usedRoleIds.has(role.id));
 }
 
 function readItineraryOverrides() {
@@ -432,15 +447,14 @@ function renderTravelerDraw() {
   travelerDrawGrid.innerHTML = travelers
     .map(
       (traveler, index) => {
-        const claimedByOther = isClaimedByOtherClient(traveler.id);
-        const claimedByMe = isClaimedByCurrentClient(traveler.id);
-        const label = claimedByOther ? "已被選" : claimedByMe ? "你的身份" : "抽這張";
+        const selectedByMe = state.travelerId === traveler.id;
+        const label = selectedByMe ? "這是我" : "選我";
 
         return `
-        <button class="draw-card" type="button" data-traveler="${traveler.id}" ${claimedByOther ? "disabled" : ""}>
+        <button class="draw-card" type="button" data-traveler="${traveler.id}">
           <span>
             <strong>${traveler.name}</strong>
-            <span>抽到後會依日期輪替角色 ${index + 1}</span>
+            <span>選擇後每天再抽今日角色 ${index + 1}</span>
           </span>
           <span class="pill ${traveler.color}">${label}</span>
         </button>
@@ -450,66 +464,68 @@ function renderTravelerDraw() {
     .join("");
 }
 
-async function claimTraveler(travelerId) {
-  if (!sync.ready) return true;
-
-  const { ref, runTransaction } = sync.databaseApi;
-  const claimRef = ref(sync.database, `rooms/${SYNC_ROOM_ID}/travelers/${travelerId}`);
-  const result = await runTransaction(claimRef, (currentClaim) => {
-    if (!currentClaim || currentClaim.clientId === clientId) {
-      return {
-        clientId,
-        name: travelers.find((traveler) => traveler.id === travelerId)?.name || travelerId,
-        claimedAt: Date.now(),
-      };
-    }
-
-    return undefined;
-  });
-
-  return result.committed;
-}
-
-async function releaseTraveler(travelerId) {
-  if (!sync.ready || !travelerId) return;
-
-  const { ref, runTransaction } = sync.databaseApi;
-  const claimRef = ref(sync.database, `rooms/${SYNC_ROOM_ID}/travelers/${travelerId}`);
-  await runTransaction(claimRef, (currentClaim) => {
-    if (currentClaim?.clientId === clientId) return null;
-    return currentClaim;
-  });
-}
-
 async function setTraveler(travelerId) {
-  if (isClaimedByOtherClient(travelerId)) {
-    alert("這張身份卡已經被別人抽走了。");
-    render();
-    return;
-  }
-
-  const previousTravelerId = state.travelerId;
-  if (previousTravelerId && previousTravelerId !== travelerId) {
-    await releaseTraveler(previousTravelerId);
-  }
-
-  const claimed = await claimTraveler(travelerId);
-  if (!claimed) {
-    alert("這張身份卡剛剛被別人抽走了，請再抽一次。");
-    render();
-    return;
-  }
-
   state.travelerId = travelerId;
   localStorage.setItem(STORAGE_KEYS.traveler, state.travelerId);
   render();
 }
 
+async function drawTodayRole() {
+  if (!state.travelerId) return;
+
+  const day = tripDays[getTodayIndex()];
+  const localDraws = readDailyRoleDraws();
+  const currentAssignments = localDraws[day.date] || {};
+
+  if (currentAssignments[state.travelerId]) {
+    renderTravelerStatus();
+    renderActiveTab();
+    return;
+  }
+
+  if (!sync.ready) {
+    const availableRoles = getAvailableRoles(getTodayIndex(), currentAssignments);
+    if (!availableRoles.length) {
+      alert("今天的角色都已經被抽完了。");
+      return;
+    }
+
+    const role = availableRoles[Math.floor(Math.random() * availableRoles.length)];
+    localDraws[day.date] = {
+      ...currentAssignments,
+      [state.travelerId]: role.id,
+    };
+    localStorage.setItem(STORAGE_KEYS.dailyRoleDraws, JSON.stringify(localDraws));
+    renderTravelerStatus();
+    renderActiveTab();
+    return;
+  }
+
+  const { ref, runTransaction } = sync.databaseApi;
+  const dayDrawRef = ref(sync.database, `rooms/${SYNC_ROOM_ID}/dailyRoleDraws/${day.date}`);
+  const result = await runTransaction(dayDrawRef, (assignments) => {
+    const nextAssignments = assignments || {};
+    if (nextAssignments[state.travelerId]) return nextAssignments;
+
+    const availableRoles = getAvailableRoles(getTodayIndex(), nextAssignments);
+    if (!availableRoles.length) return undefined;
+
+    const role = availableRoles[Math.floor(Math.random() * availableRoles.length)];
+    return {
+      ...nextAssignments,
+      [state.travelerId]: role.id,
+    };
+  });
+
+  if (!result.committed) {
+    alert("今天的角色剛剛被抽完了。");
+  }
+}
+
 function renderTravelerStatus() {
   const traveler = getTraveler();
   const dayIndex = getTodayIndex();
-  const travelerIndex = travelers.findIndex((item) => item.id === traveler.id);
-  const role = getRoleFor(dayIndex, travelerIndex);
+  const role = getAssignedRoleForTraveler(traveler.id, dayIndex);
   const smokeRoll = getSmokeRollTraveler(dayIndex);
   const isSmokeRoll = smokeRoll.id === traveler.id;
 
@@ -519,12 +535,17 @@ function renderTravelerStatus() {
         <p class="eyebrow">你的身份</p>
         <h2>${traveler.name}</h2>
       </div>
-      <span class="pill ${traveler.color}">${role.name}</span>
+      <span class="pill ${traveler.color}">${role ? role.name : "今日未抽"}</span>
     </div>
     <div class="pill-row">
       <span class="pill">${tripDays[dayIndex].label}</span>
       <span class="pill ${isSmokeRoll ? "gold" : ""}">${isSmokeRoll ? "你是今日煙捲" : `今日煙捲：${smokeRoll.name}`}</span>
     </div>
+    ${
+      role
+        ? ""
+        : `<button class="draw-role-button" type="button" data-draw-today-role>抽今日角色</button>`
+    }
   `;
 }
 
@@ -548,7 +569,7 @@ function renderActiveTab() {
 async function setupSync() {
   if (!sync.enabled) {
     state.syncStatus = "本機模式";
-    state.syncMessage = "貼上 Firebase config 後，身份和今日行程才會多人同步。";
+    state.syncMessage = "貼上 Firebase config 後，每日角色抽籤和今日行程才會多人同步。";
     return;
   }
 
@@ -567,16 +588,12 @@ async function setupSync() {
     sync.ready = true;
 
     state.syncStatus = "多人同步";
-    state.syncMessage = "身份抽籤與今日行程會同步給所有旅伴。";
+    state.syncMessage = "每日角色抽籤與今日行程會同步給所有旅伴。";
 
     const { ref, onValue } = databaseApi;
-    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/travelers`), (snapshot) => {
-      state.claims = snapshot.val() || {};
-      if (state.travelerId && isClaimedByOtherClient(state.travelerId)) {
-        localStorage.removeItem(STORAGE_KEYS.traveler);
-        state.travelerId = null;
-        alert("你的身份已被其他裝置佔用，請重新抽身份。");
-      }
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/dailyRoleDraws`), (snapshot) => {
+      state.syncedDailyRoleDraws = snapshot.val() || {};
+      localStorage.setItem(STORAGE_KEYS.dailyRoleDraws, JSON.stringify(state.syncedDailyRoleDraws));
       render();
     });
 
@@ -627,8 +644,7 @@ function renderToday() {
   const dayIndex = getTodayIndex();
   const day = tripDays[dayIndex];
   const traveler = getTraveler();
-  const travelerIndex = travelers.findIndex((item) => item.id === traveler.id);
-  const role = getRoleFor(dayIndex, travelerIndex);
+  const role = getAssignedRoleForTraveler(traveler.id, dayIndex);
   const smokeRoll = getSmokeRollTraveler(dayIndex);
   const { plannedPlaces, backupPlaces } = getDayPlan(dayIndex);
   const dailyCost = [...plannedPlaces, ...backupPlaces].reduce((sum, place) => sum + place.cost, 0);
@@ -640,10 +656,15 @@ function renderToday() {
       <h3>${day.label}</h3>
       <p>${day.note}</p>
       <div class="pill-row">
-        <span class="pill green">${role.name}</span>
+        <span class="pill green">${role ? role.name : "今日角色未抽"}</span>
         <span class="pill gold">煙捲：${smokeRoll.name}</span>
         <span class="pill blue">預估 ${money(dailyCost)}</span>
       </div>
+      ${
+        role
+          ? ""
+          : `<button class="draw-role-button" type="button" data-draw-today-role>抽今日角色</button>`
+      }
     </article>
     <h2 class="section-title">預排行程</h2>
     <div class="place-list">
@@ -843,11 +864,11 @@ function renderRoles() {
         <div class="place-list">
           ${travelers
             .map((traveler, travelerIndex) => {
-              const role = getRoleFor(dayIndex, travelerIndex);
+              const role = getAssignedRoleForTraveler(traveler.id, dayIndex);
               return `
                 <div class="role-assignment ${traveler.color}">
                   <span>${traveler.name}</span>
-                  <strong>${role.name}</strong>
+                  <strong>${role ? role.name : "未抽"}</strong>
                 </div>
               `;
             })
@@ -920,6 +941,16 @@ function bindTabEvents() {
       renderActiveTab();
     });
   });
+
+  document.querySelectorAll("[data-draw-today-role]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      button.textContent = "抽籤中...";
+      await drawTodayRole();
+      renderTravelerStatus();
+      renderActiveTab();
+    });
+  });
 }
 
 function handleExpenseSubmit(event) {
@@ -957,17 +988,6 @@ travelerDrawGrid.addEventListener("click", async (event) => {
   await setTraveler(button.dataset.traveler);
 });
 
-randomDrawButton.addEventListener("click", async () => {
-  const availableTravelers = getAvailableTravelers();
-  if (!availableTravelers.length) {
-    alert("四張身份卡都已經被抽走了。");
-    return;
-  }
-
-  const randomIndex = Math.floor(Math.random() * availableTravelers.length);
-  await setTraveler(availableTravelers[randomIndex].id);
-});
-
 bottomNav.addEventListener("click", (event) => {
   const button = event.target.closest("[data-tab]");
   if (!button) return;
@@ -976,8 +996,7 @@ bottomNav.addEventListener("click", (event) => {
   renderActiveTab();
 });
 
-resetTravelerButton.addEventListener("click", async () => {
-  await releaseTraveler(state.travelerId);
+resetTravelerButton.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEYS.traveler);
   state.travelerId = null;
   state.editingExpenseId = null;
