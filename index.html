@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>曼谷旅伴行程小工具</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Bangkok 2026</p>
+          <h1>曼谷旅伴</h1>
+        </div>
+        <button class="icon-button" id="resetTravelerButton" type="button" aria-label="重新抽身份" title="重新抽身份">
+          ↻
+        </button>
+      </header>
+
+      <main>
+        <section class="setup-view" id="setupView" aria-labelledby="setupTitle">
+          <div class="hero-panel">
+            <p class="eyebrow">7/5 - 7/10</p>
+            <h2 id="setupTitle">先抽出你的旅伴身份</h2>
+            <p>
+              每個人會有自己的手機介面、預算紀錄和每日角色。抽完後會存在這台手機裡。
+            </p>
+          </div>
+          <button class="draw-random-button" id="randomDrawButton" type="button">隨機抽一張身份卡</button>
+          <div class="draw-grid" id="travelerDrawGrid"></div>
+        </section>
+
+        <section class="main-view is-hidden" id="mainView" aria-live="polite">
+          <div class="status-card" id="travelerStatus"></div>
+          <section class="tab-panel" id="tabPanel"></section>
+        </section>
+      </main>
+
+      <nav class="bottom-nav is-hidden" id="bottomNav" aria-label="主要分頁">
+        <button type="button" data-tab="today" class="is-active">今日</button>
+        <button type="button" data-tab="itinerary">行程</button>
+        <button type="button" data-tab="candidates">候補</button>
+        <button type="button" data-tab="budget">預算</button>
+        <button type="button" data-tab="roles">角色</button>
+      </nav>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
