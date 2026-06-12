@@ -12,6 +12,8 @@
 - 可以看 2026/7/5 到 2026/7/10 的曼谷行程。
 - 可以看每個地點預估會停留多久、預估會花多少錢。
 - 候補行程可以加入今日行程，也可以從今日行程移除；設定 Firebase 後會同步給所有人。
+- 今日行程有 Google Maps 路線入口；貼上 Google Maps Embed API key 後，可以直接在頁面內顯示路線地圖。
+- 每個地點都有「開啟 Google Maps」按鈕，方便旅伴單獨查位置。
 - 每個人有自己的預算頁，記錄自己花了多少、還剩多少。
 - 每人預算是 NT$20,000，不包含機票和酒店。
 
@@ -70,6 +72,18 @@ Firebase Realtime Database 規則可以先用這份簡單版本：
 
 這份規則適合朋友小工具測試；正式公開連結前應改成更嚴格的規則。
 
+## Google Maps 設定
+
+目前沒有放地點照片，只做路線和位置按鈕。沒有設定 Google Maps Embed API key 時，今日頁會顯示「開啟今日路線」按鈕，點開外部 Google Maps。
+
+如果要把路線地圖直接嵌入畫面，把 Google Maps Embed API key 貼到 `maps-config.js`：
+
+```js
+export const GOOGLE_MAPS_EMBED_API_KEY = "你的 Google Maps Embed API key";
+```
+
+設定後，只要今日行程加入或移除地點，內嵌路線也會跟著更新。
+
 ## 目前狀態
 
 已完成多人同步版靜態網頁：
@@ -78,6 +92,7 @@ Firebase Realtime Database 規則可以先用這份簡單版本：
 - `styles.css`
 - `app.js`
 - `firebase-config.js`
+- `maps-config.js`
 
 請先看這份規格：
 

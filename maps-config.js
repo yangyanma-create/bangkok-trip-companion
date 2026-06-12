@@ -1,0 +1,1 @@
+export const GOOGLE_MAPS_EMBED_API_KEY = "";

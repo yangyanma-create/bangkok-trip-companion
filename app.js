@@ -1,4 +1,5 @@
 import { FIREBASE_CONFIG, SYNC_ROOM_ID } from "./firebase-config.js";
+import { GOOGLE_MAPS_EMBED_API_KEY } from "./maps-config.js";
 
 const STORAGE_KEYS = {
   traveler: "bangkok-trip-traveler",
@@ -86,6 +87,7 @@ const places = [
     cost: 300,
     priority: "必去",
     status: "預排",
+    mapQuery: "Suvarnabhumi Airport, Bangkok, Thailand",
     note: "預估含入境、領行李與進市區交通。",
   },
   {
@@ -97,6 +99,7 @@ const places = [
     cost: 500,
     priority: "必去",
     status: "預排",
+    mapQuery: "Bangkok, Thailand",
     note: "買水、SIM 或交通卡，確認集合點。",
   },
   {
@@ -108,6 +111,7 @@ const places = [
     cost: 350,
     priority: "必去",
     status: "預排",
+    mapQuery: "Suvarnabhumi Airport, Bangkok, Thailand",
     note: "預留塞車與退稅時間。",
   },
   {
@@ -119,6 +123,7 @@ const places = [
     cost: 200,
     priority: "高",
     status: "候補",
+    mapQuery: "Wat Arun, Bangkok, Thailand",
     note: "適合白天拍照，可搭船串河畔行程。",
   },
   {
@@ -130,6 +135,7 @@ const places = [
     cost: 1200,
     priority: "中",
     status: "候補",
+    mapQuery: "ICONSIAM, Bangkok, Thailand",
     note: "逛街、吃飯、吹冷氣都方便。",
   },
   {
@@ -141,6 +147,7 @@ const places = [
     cost: 900,
     priority: "高",
     status: "候補",
+    mapQuery: "Thai massage, Bangkok, Thailand",
     note: "適合放在走很多路的晚上。",
   },
   {
@@ -152,6 +159,7 @@ const places = [
     cost: 1500,
     priority: "中",
     status: "候補",
+    mapQuery: "Chatuchak Weekend Market, Bangkok, Thailand",
     note: "週末最完整，平日需確認店家狀況。",
   },
   {
@@ -163,6 +171,7 @@ const places = [
     cost: 800,
     priority: "中",
     status: "候補",
+    mapQuery: "JODD FAIRS Rama 9, Bangkok, Thailand",
     note: "適合晚餐與小吃集合。",
   },
   {
@@ -174,6 +183,7 @@ const places = [
     cost: 1000,
     priority: "高",
     status: "候補",
+    mapQuery: "Yaowarat Road, Bangkok, Thailand",
     note: "晚上氣氛好，適合美食路線。",
   },
   {
@@ -185,6 +195,7 @@ const places = [
     cost: 2500,
     priority: "中",
     status: "候補",
+    mapQuery: "Ayutthaya Historical Park, Thailand",
     note: "需要較早出門，適合整天行程。",
   },
   {
@@ -196,6 +207,7 @@ const places = [
     cost: 1800,
     priority: "低",
     status: "候補",
+    mapQuery: "Chao Phraya River, Bangkok, Thailand",
     note: "預算較高，適合最後決策者評估。",
   },
   {
@@ -207,6 +219,7 @@ const places = [
     cost: 1800,
     priority: "低",
     status: "候補",
+    mapQuery: "rooftop bar, Bangkok, Thailand",
     note: "注意服裝規定與天氣。",
   },
   {
@@ -218,6 +231,7 @@ const places = [
     cost: 1500,
     priority: "中",
     status: "候補",
+    mapQuery: "CentralWorld, Bangkok, Thailand",
     note: "伴手禮、餐廳、百貨集中。",
   },
   {
@@ -229,6 +243,7 @@ const places = [
     cost: 600,
     priority: "低",
     status: "候補",
+    mapQuery: "night market near Bangkok, Thailand",
     note: "抵達日不想跑遠時使用。",
   },
 ];
@@ -305,6 +320,46 @@ function getTodayIndex() {
 
 function getPlace(id) {
   return places.find((place) => place.id === id);
+}
+
+function getPlaceMapQuery(place) {
+  return place.mapQuery || `${place.name}, Bangkok, Thailand`;
+}
+
+function googleMapsSearchUrl(place) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(getPlaceMapQuery(place))}`;
+}
+
+function googleMapsDirectionsUrl(routePlaces) {
+  const validPlaces = routePlaces.filter(Boolean);
+  if (validPlaces.length < 2) return "";
+
+  const origin = encodeURIComponent(getPlaceMapQuery(validPlaces[0]));
+  const destination = encodeURIComponent(getPlaceMapQuery(validPlaces[validPlaces.length - 1]));
+  const waypoints = validPlaces
+    .slice(1, -1)
+    .map(getPlaceMapQuery)
+    .map(encodeURIComponent)
+    .join("|");
+  const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
+
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointParam}&travelmode=driving`;
+}
+
+function googleMapsEmbedDirectionsUrl(routePlaces) {
+  const validPlaces = routePlaces.filter(Boolean);
+  if (!GOOGLE_MAPS_EMBED_API_KEY || validPlaces.length < 2) return "";
+
+  const origin = encodeURIComponent(getPlaceMapQuery(validPlaces[0]));
+  const destination = encodeURIComponent(getPlaceMapQuery(validPlaces[validPlaces.length - 1]));
+  const waypoints = validPlaces
+    .slice(1, -1)
+    .map(getPlaceMapQuery)
+    .map(encodeURIComponent)
+    .join("|");
+  const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
+
+  return `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(GOOGLE_MAPS_EMBED_API_KEY)}&origin=${origin}&destination=${destination}${waypointParam}&mode=driving&language=zh-TW&region=TH`;
 }
 
 function getRole(roleId) {
@@ -635,7 +690,58 @@ function placeCard(place) {
         <span class="meta">${money(place.cost)}</span>
         <span class="meta">優先度 ${place.priority}</span>
       </div>
-      ${actionHtml}
+      <div class="place-actions">
+        ${actionHtml}
+        <a class="map-link" href="${googleMapsSearchUrl(place)}" target="_blank" rel="noopener">開啟 Google Maps</a>
+      </div>
+    </article>
+  `;
+}
+
+function renderTodayMap(plannedPlaces) {
+  if (plannedPlaces.length < 2) {
+    return `
+      <article class="card map-card">
+        <div class="status-row">
+          <h3>今日路線地圖</h3>
+          <span class="pill blue">Google Maps</span>
+        </div>
+        <p>今日行程至少需要 2 個地點，才會產生路線。</p>
+      </article>
+    `;
+  }
+
+  const directionsUrl = googleMapsDirectionsUrl(plannedPlaces);
+  const embedUrl = googleMapsEmbedDirectionsUrl(plannedPlaces);
+
+  if (!embedUrl) {
+    return `
+      <article class="card map-card">
+        <div class="status-row">
+          <h3>今日路線地圖</h3>
+          <span class="pill gold">未設定 key</span>
+        </div>
+        <p>目前尚未設定 Google Maps Embed API key，先用外部 Google Maps 開啟今日路線。</p>
+        <a class="map-button" href="${directionsUrl}" target="_blank" rel="noopener">開啟今日路線</a>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="card map-card">
+      <div class="status-row">
+        <h3>今日路線地圖</h3>
+        <span class="pill blue">自動更新</span>
+      </div>
+      <iframe
+        class="route-map"
+        title="今日路線地圖"
+        loading="lazy"
+        allowfullscreen
+        referrerpolicy="no-referrer-when-downgrade"
+        src="${embedUrl}"
+      ></iframe>
+      <a class="map-button secondary" href="${directionsUrl}" target="_blank" rel="noopener">在 Google Maps 開啟</a>
     </article>
   `;
 }
@@ -666,6 +772,7 @@ function renderToday() {
           : `<button class="draw-role-button" type="button" data-draw-today-role>抽今日角色</button>`
       }
     </article>
+    ${renderTodayMap(plannedPlaces)}
     <h2 class="section-title">預排行程</h2>
     <div class="place-list">
       ${
