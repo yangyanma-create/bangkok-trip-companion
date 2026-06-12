@@ -1,8 +1,11 @@
+import { FIREBASE_CONFIG, SYNC_ROOM_ID } from "./firebase-config.js";
+
 const STORAGE_KEYS = {
   traveler: "bangkok-trip-traveler",
   expenses: "bangkok-trip-expenses",
   activeTab: "bangkok-trip-active-tab",
   itineraryOverrides: "bangkok-trip-itinerary-overrides",
+  clientId: "bangkok-trip-client-id",
 };
 
 const BUDGET_LIMIT = 20000;
@@ -233,16 +236,28 @@ const state = {
   travelerId: localStorage.getItem(STORAGE_KEYS.traveler),
   activeTab: localStorage.getItem(STORAGE_KEYS.activeTab) || "today",
   editingExpenseId: null,
+  claims: {},
+  syncedItineraryOverrides: null,
+  syncStatus: "本機模式",
+  syncMessage: "尚未設定 Firebase，多人同步尚未啟用。",
   filters: {
     type: "全部",
     priority: "全部",
   },
 };
 
+const sync = {
+  enabled: Boolean(FIREBASE_CONFIG?.apiKey && FIREBASE_CONFIG?.databaseURL),
+  ready: false,
+  database: null,
+  databaseApi: null,
+};
+
 const setupView = document.querySelector("#setupView");
 const mainView = document.querySelector("#mainView");
 const travelerDrawGrid = document.querySelector("#travelerDrawGrid");
 const randomDrawButton = document.querySelector("#randomDrawButton");
+const syncBanner = document.querySelector("#syncBanner");
 const travelerStatus = document.querySelector("#travelerStatus");
 const tabPanel = document.querySelector("#tabPanel");
 const bottomNav = document.querySelector("#bottomNav");
@@ -257,6 +272,30 @@ function minutesLabel(minutes) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} 小時 ${rest} 分鐘` : `${hours} 小時`;
+}
+
+function getClientId() {
+  let clientId = localStorage.getItem(STORAGE_KEYS.clientId);
+  if (!clientId) {
+    clientId = crypto.randomUUID();
+    localStorage.setItem(STORAGE_KEYS.clientId, clientId);
+  }
+  return clientId;
+}
+
+const clientId = getClientId();
+
+function isClaimedByCurrentClient(travelerId) {
+  return state.claims[travelerId]?.clientId === clientId;
+}
+
+function isClaimedByOtherClient(travelerId) {
+  const claim = state.claims[travelerId];
+  return Boolean(claim && claim.clientId !== clientId);
+}
+
+function getAvailableTravelers() {
+  return travelers.filter((traveler) => !isClaimedByOtherClient(traveler.id));
 }
 
 function getTraveler() {
@@ -285,6 +324,10 @@ function getPlace(id) {
 }
 
 function readItineraryOverrides() {
+  if (state.syncedItineraryOverrides) {
+    return state.syncedItineraryOverrides;
+  }
+
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEYS.itineraryOverrides) || "{}");
   } catch {
@@ -292,8 +335,12 @@ function readItineraryOverrides() {
   }
 }
 
-function writeItineraryOverrides(overrides) {
+async function writeItineraryOverrides(overrides) {
   localStorage.setItem(STORAGE_KEYS.itineraryOverrides, JSON.stringify(overrides));
+  if (!sync.ready) return;
+
+  const { ref, set } = sync.databaseApi;
+  await set(ref(sync.database, `rooms/${SYNC_ROOM_ID}/itineraryOverrides`), overrides);
 }
 
 function uniqueIds(ids) {
@@ -317,7 +364,7 @@ function getDayPlan(dayIndex) {
   };
 }
 
-function updateTodayPlan(placeId, action) {
+async function updateTodayPlan(placeId, action) {
   const day = tripDays[getTodayIndex()];
   const overrides = readItineraryOverrides();
   const current = overrides[day.date] || { added: [], removed: [] };
@@ -339,7 +386,7 @@ function updateTodayPlan(placeId, action) {
     removed: Array.from(removed),
   };
 
-  writeItineraryOverrides(overrides);
+  await writeItineraryOverrides(overrides);
 }
 
 function readExpenses() {
@@ -364,6 +411,7 @@ function render() {
   bottomNav.classList.toggle("is-hidden", !hasTraveler);
   resetTravelerButton.classList.toggle("is-hidden", !hasTraveler);
 
+  renderSyncBanner();
   renderTravelerDraw();
   if (hasTraveler) {
     renderTravelerStatus();
@@ -371,23 +419,87 @@ function render() {
   }
 }
 
+function renderSyncBanner() {
+  syncBanner.innerHTML = `
+    <div class="sync-status ${sync.ready ? "online" : "local"}">
+      <strong>${state.syncStatus}</strong>
+      <span>${state.syncMessage}</span>
+    </div>
+  `;
+}
+
 function renderTravelerDraw() {
   travelerDrawGrid.innerHTML = travelers
     .map(
-      (traveler, index) => `
-        <button class="draw-card" type="button" data-traveler="${traveler.id}">
+      (traveler, index) => {
+        const claimedByOther = isClaimedByOtherClient(traveler.id);
+        const claimedByMe = isClaimedByCurrentClient(traveler.id);
+        const label = claimedByOther ? "已被選" : claimedByMe ? "你的身份" : "抽這張";
+
+        return `
+        <button class="draw-card" type="button" data-traveler="${traveler.id}" ${claimedByOther ? "disabled" : ""}>
           <span>
             <strong>${traveler.name}</strong>
             <span>抽到後會依日期輪替角色 ${index + 1}</span>
           </span>
-          <span class="pill ${traveler.color}">抽這張</span>
+          <span class="pill ${traveler.color}">${label}</span>
         </button>
-      `,
+      `;
+      },
     )
     .join("");
 }
 
-function setTraveler(travelerId) {
+async function claimTraveler(travelerId) {
+  if (!sync.ready) return true;
+
+  const { ref, runTransaction } = sync.databaseApi;
+  const claimRef = ref(sync.database, `rooms/${SYNC_ROOM_ID}/travelers/${travelerId}`);
+  const result = await runTransaction(claimRef, (currentClaim) => {
+    if (!currentClaim || currentClaim.clientId === clientId) {
+      return {
+        clientId,
+        name: travelers.find((traveler) => traveler.id === travelerId)?.name || travelerId,
+        claimedAt: Date.now(),
+      };
+    }
+
+    return undefined;
+  });
+
+  return result.committed;
+}
+
+async function releaseTraveler(travelerId) {
+  if (!sync.ready || !travelerId) return;
+
+  const { ref, runTransaction } = sync.databaseApi;
+  const claimRef = ref(sync.database, `rooms/${SYNC_ROOM_ID}/travelers/${travelerId}`);
+  await runTransaction(claimRef, (currentClaim) => {
+    if (currentClaim?.clientId === clientId) return null;
+    return currentClaim;
+  });
+}
+
+async function setTraveler(travelerId) {
+  if (isClaimedByOtherClient(travelerId)) {
+    alert("這張身份卡已經被別人抽走了。");
+    render();
+    return;
+  }
+
+  const previousTravelerId = state.travelerId;
+  if (previousTravelerId && previousTravelerId !== travelerId) {
+    await releaseTraveler(previousTravelerId);
+  }
+
+  const claimed = await claimTraveler(travelerId);
+  if (!claimed) {
+    alert("這張身份卡剛剛被別人抽走了，請再抽一次。");
+    render();
+    return;
+  }
+
   state.travelerId = travelerId;
   localStorage.setItem(STORAGE_KEYS.traveler, state.travelerId);
   render();
@@ -431,6 +543,57 @@ function renderActiveTab() {
 
   tabPanel.innerHTML = renderers[state.activeTab]();
   bindTabEvents();
+}
+
+async function setupSync() {
+  if (!sync.enabled) {
+    state.syncStatus = "本機模式";
+    state.syncMessage = "貼上 Firebase config 後，身份和今日行程才會多人同步。";
+    return;
+  }
+
+  try {
+    state.syncStatus = "連線中";
+    state.syncMessage = "正在連接 Firebase 多人同步。";
+
+    const [{ initializeApp }, databaseApi] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js"),
+    ]);
+
+    const app = initializeApp(FIREBASE_CONFIG);
+    sync.databaseApi = databaseApi;
+    sync.database = databaseApi.getDatabase(app);
+    sync.ready = true;
+
+    state.syncStatus = "多人同步";
+    state.syncMessage = "身份抽籤與今日行程會同步給所有旅伴。";
+
+    const { ref, onValue } = databaseApi;
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/travelers`), (snapshot) => {
+      state.claims = snapshot.val() || {};
+      if (state.travelerId && isClaimedByOtherClient(state.travelerId)) {
+        localStorage.removeItem(STORAGE_KEYS.traveler);
+        state.travelerId = null;
+        alert("你的身份已被其他裝置佔用，請重新抽身份。");
+      }
+      render();
+    });
+
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/itineraryOverrides`), (snapshot) => {
+      state.syncedItineraryOverrides = snapshot.val() || {};
+      localStorage.setItem(STORAGE_KEYS.itineraryOverrides, JSON.stringify(state.syncedItineraryOverrides));
+      if (state.travelerId) {
+        renderTravelerStatus();
+        renderActiveTab();
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    sync.ready = false;
+    state.syncStatus = "同步失敗";
+    state.syncMessage = "Firebase 連線失敗，暫時使用本機模式。";
+  }
 }
 
 function placeCard(place) {
@@ -743,16 +906,16 @@ function bindTabEvents() {
   });
 
   document.querySelectorAll("[data-add-today]").forEach((button) => {
-    button.addEventListener("click", () => {
-      updateTodayPlan(button.dataset.addToday, "add");
+    button.addEventListener("click", async () => {
+      await updateTodayPlan(button.dataset.addToday, "add");
       renderTravelerStatus();
       renderActiveTab();
     });
   });
 
   document.querySelectorAll("[data-remove-today]").forEach((button) => {
-    button.addEventListener("click", () => {
-      updateTodayPlan(button.dataset.removeToday, "remove");
+    button.addEventListener("click", async () => {
+      await updateTodayPlan(button.dataset.removeToday, "remove");
       renderTravelerStatus();
       renderActiveTab();
     });
@@ -788,15 +951,21 @@ function handleExpenseSubmit(event) {
   renderActiveTab();
 }
 
-travelerDrawGrid.addEventListener("click", (event) => {
+travelerDrawGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-traveler]");
   if (!button) return;
-  setTraveler(button.dataset.traveler);
+  await setTraveler(button.dataset.traveler);
 });
 
-randomDrawButton.addEventListener("click", () => {
-  const randomIndex = Math.floor(Math.random() * travelers.length);
-  setTraveler(travelers[randomIndex].id);
+randomDrawButton.addEventListener("click", async () => {
+  const availableTravelers = getAvailableTravelers();
+  if (!availableTravelers.length) {
+    alert("四張身份卡都已經被抽走了。");
+    return;
+  }
+
+  const randomIndex = Math.floor(Math.random() * availableTravelers.length);
+  await setTraveler(availableTravelers[randomIndex].id);
 });
 
 bottomNav.addEventListener("click", (event) => {
@@ -807,11 +976,13 @@ bottomNav.addEventListener("click", (event) => {
   renderActiveTab();
 });
 
-resetTravelerButton.addEventListener("click", () => {
+resetTravelerButton.addEventListener("click", async () => {
+  await releaseTraveler(state.travelerId);
   localStorage.removeItem(STORAGE_KEYS.traveler);
   state.travelerId = null;
   state.editingExpenseId = null;
   render();
 });
 
+await setupSync();
 render();

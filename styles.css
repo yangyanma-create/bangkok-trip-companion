@@ -125,6 +125,39 @@ button {
   gap: 10px;
 }
 
+.sync-banner {
+  margin-bottom: 10px;
+}
+
+.sync-status {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 250, 241, 0.84);
+}
+
+.sync-status strong {
+  font-size: 14px;
+}
+
+.sync-status span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.sync-status.online {
+  border-color: rgba(31, 122, 90, 0.45);
+  background: rgba(31, 122, 90, 0.08);
+}
+
+.sync-status.local {
+  border-color: rgba(183, 121, 31, 0.45);
+  background: rgba(183, 121, 31, 0.08);
+}
+
 .draw-random-button {
   width: 100%;
   min-height: 52px;
@@ -148,6 +181,11 @@ button {
   color: var(--ink);
   text-align: left;
   background: var(--surface-strong);
+}
+
+.draw-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .draw-card strong {
