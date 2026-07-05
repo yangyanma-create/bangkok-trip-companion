@@ -5,12 +5,55 @@ const STORAGE_KEYS = {
   traveler: "bangkok-trip-traveler",
   expenses: "bangkok-trip-expenses",
   activeTab: "bangkok-trip-active-tab",
+  selectedDayIndex: "bangkok-trip-selected-day-index",
   itineraryOverrides: "bangkok-trip-itinerary-overrides",
   dailyRoleDraws: "bangkok-trip-daily-role-draws",
+  completedStops: "bangkok-trip-completed-stops",
+  decisionVotes: "bangkok-trip-decision-votes",
+  randomDecisionPicks: "bangkok-trip-random-decision-picks",
+  customPlaces: "bangkok-trip-custom-places",
+  deletedCandidatePlaces: "bangkok-trip-deleted-candidate-places",
   clientId: "bangkok-trip-client-id",
 };
 
 const BUDGET_LIMIT = 20000;
+const BANGKOK_WEATHER = {
+  latitude: 13.7563,
+  longitude: 100.5018,
+  label: "曼谷",
+};
+
+const dayPeriods = [
+  { id: "morning", label: "早上" },
+  { id: "afternoon", label: "下午" },
+  { id: "evening", label: "晚上" },
+];
+
+const tripSettings = {
+  hotel: {
+    name: "學院旅館 College Haus.",
+    address: "438/17 Chawakun Alley, Rangnam Rd, Thanon Phaya Thai, Ratchathewi, Bangkok 10400, Thailand",
+    phone: "+66 83 279 1111",
+    mapQuery: "College Haus 438/17 Chawakun Alley Rangnam Rd Ratchathewi Bangkok 10400 Thailand",
+    note: "入住 2026/7/5 14:00 後，退房 2026/7/10 12:00 前。",
+  },
+  flights: {
+    outbound: {
+      code: "SL397",
+      airline: "Thai Lion Air",
+      route: "TPE → DMK",
+      depart: "2026/7/5 16:40",
+      arrive: "2026/7/5 19:30",
+    },
+    return: {
+      code: "VZ568",
+      airline: "Thai Vietjet Air",
+      route: "BKK → TPE",
+      depart: "2026/7/10 09:10",
+      arrive: "2026/7/10 13:55",
+    },
+  },
+};
 
 const travelers = [
   { id: "a", name: "液蠔", color: "teal" },
@@ -26,12 +69,25 @@ const roles = [
   { id: "ride", name: "叫車的", description: "負責 Grab、Bolt、計程車溝通與路線確認。" },
 ];
 
+const googleRandomDecisionQueries = [
+  { label: "熱門景點", query: "popular tourist attractions near me" },
+  { label: "在地美食", query: "popular restaurants near me" },
+  { label: "百貨商場", query: "shopping mall near me" },
+  { label: "人氣商圈", query: "popular area near me" },
+  { label: "夜市小吃", query: "night market street food near me" },
+  { label: "咖啡甜點", query: "popular cafe dessert near me" },
+  { label: "室內景點", query: "indoor attractions near me" },
+  { label: "按摩放鬆", query: "thai massage near me" },
+];
+
+const starterSuggestionIds = new Set(["wat-arun", "iconsiam", "thai-massage"]);
+
 const tripDays = [
   {
     date: "2026-07-05",
     label: "7/5 出發日",
     type: "flight",
-    note: "搭飛機、抵達曼谷、入住與熟悉周邊。",
+    note: `${tripSettings.flights.outbound.code} ${tripSettings.flights.outbound.route}，${tripSettings.flights.outbound.depart} 起飛，${tripSettings.flights.outbound.arrive} 抵達。`,
     planned: ["airport-arrival", "hotel-checkin"],
     backups: ["nearby-night-market"],
   },
@@ -71,8 +127,8 @@ const tripDays = [
     date: "2026-07-10",
     label: "7/10 回程日",
     type: "flight",
-    note: "整理行李、前往機場、搭飛機回家。",
-    planned: ["airport-departure"],
+    note: `${tripSettings.flights.return.code} ${tripSettings.flights.return.route}，${tripSettings.flights.return.depart} 起飛，${tripSettings.flights.return.arrive} 抵達。`,
+    planned: ["hotel-checkout", "airport-departure"],
     backups: [],
   },
 ];
@@ -80,45 +136,62 @@ const tripDays = [
 const places = [
   {
     id: "airport-arrival",
-    name: "抵達曼谷機場",
-    type: "交通",
-    area: "機場",
+    name: `${tripSettings.flights.outbound.code} 抵達廊曼機場`,
+    type: "航班",
+    area: "DMK",
+    period: "evening",
     duration: 90,
     cost: 300,
     priority: "必去",
     status: "預排",
-    mapQuery: "Suvarnabhumi Airport, Bangkok, Thailand",
-    note: "預估含入境、領行李與進市區交通。",
+    mapQuery: "Don Mueang International Airport, Bangkok, Thailand",
+    note: `${tripSettings.flights.outbound.airline} ${tripSettings.flights.outbound.route}，${tripSettings.flights.outbound.depart} 起飛，${tripSettings.flights.outbound.arrive} 抵達。預估含入境、領行李與進市區交通。`,
   },
   {
     id: "hotel-checkin",
-    name: "入住飯店與周邊補給",
+    name: `入住 ${tripSettings.hotel.name}`,
     type: "住宿周邊",
-    area: "飯店附近",
+    area: "Ratchathewi",
+    period: "evening",
     duration: 120,
     cost: 500,
     priority: "必去",
     status: "預排",
-    mapQuery: "Bangkok, Thailand",
-    note: "買水、SIM 或交通卡，確認集合點。",
+    mapQuery: tripSettings.hotel.mapQuery,
+    note: `${tripSettings.hotel.note} 房東聯絡電話：${tripSettings.hotel.phone}。`,
+  },
+  {
+    id: "hotel-checkout",
+    name: `退房 ${tripSettings.hotel.name}`,
+    type: "住宿周邊",
+    area: "Ratchathewi",
+    period: "morning",
+    duration: 45,
+    cost: 0,
+    priority: "必去",
+    status: "預排",
+    mapQuery: tripSettings.hotel.mapQuery,
+    note: "退房日 2026/7/10，需在 12:00 前退房；因早班機，建議清晨整理行李出發。",
   },
   {
     id: "airport-departure",
-    name: "前往機場回程",
-    type: "交通",
-    area: "機場",
+    name: `${tripSettings.flights.return.code} 前往素萬那普機場`,
+    type: "航班",
+    area: "BKK",
+    period: "morning",
     duration: 150,
     cost: 350,
     priority: "必去",
     status: "預排",
     mapQuery: "Suvarnabhumi Airport, Bangkok, Thailand",
-    note: "預留塞車與退稅時間。",
+    note: `${tripSettings.flights.return.airline} ${tripSettings.flights.return.route}，${tripSettings.flights.return.depart} 起飛，${tripSettings.flights.return.arrive} 抵達。預留塞車、報到與退稅時間。`,
   },
   {
     id: "wat-arun",
     name: "鄭王廟 Wat Arun",
     type: "景點",
     area: "河畔",
+    period: "morning",
     duration: 90,
     cost: 200,
     priority: "高",
@@ -131,6 +204,7 @@ const places = [
     name: "ICONSIAM",
     type: "購物",
     area: "河畔",
+    period: "afternoon",
     duration: 180,
     cost: 1200,
     priority: "中",
@@ -143,6 +217,7 @@ const places = [
     name: "泰式按摩",
     type: "活動",
     area: "依店家",
+    period: "evening",
     duration: 120,
     cost: 900,
     priority: "高",
@@ -155,6 +230,7 @@ const places = [
     name: "洽圖洽市集",
     type: "購物",
     area: "Chatuchak",
+    period: "morning",
     duration: 210,
     cost: 1500,
     priority: "中",
@@ -167,6 +243,7 @@ const places = [
     name: "JODD FAIRS 夜市",
     type: "餐廳",
     area: "Rama 9",
+    period: "evening",
     duration: 150,
     cost: 800,
     priority: "中",
@@ -179,6 +256,7 @@ const places = [
     name: "曼谷唐人街",
     type: "餐廳",
     area: "Yaowarat",
+    period: "evening",
     duration: 180,
     cost: 1000,
     priority: "高",
@@ -191,6 +269,7 @@ const places = [
     name: "大城一日行程",
     type: "活動",
     area: "近郊",
+    period: "morning",
     duration: 480,
     cost: 2500,
     priority: "中",
@@ -203,6 +282,7 @@ const places = [
     name: "昭披耶河晚餐",
     type: "餐廳",
     area: "河畔",
+    period: "evening",
     duration: 150,
     cost: 1800,
     priority: "低",
@@ -215,6 +295,7 @@ const places = [
     name: "高空酒吧",
     type: "活動",
     area: "市中心",
+    period: "evening",
     duration: 120,
     cost: 1800,
     priority: "低",
@@ -227,6 +308,7 @@ const places = [
     name: "CentralWorld",
     type: "購物",
     area: "Siam",
+    period: "afternoon",
     duration: 180,
     cost: 1500,
     priority: "中",
@@ -239,26 +321,38 @@ const places = [
     name: "飯店附近夜市或便利商店",
     type: "餐廳",
     area: "飯店附近",
+    period: "evening",
     duration: 90,
     cost: 600,
     priority: "低",
     status: "候補",
-    mapQuery: "night market near Bangkok, Thailand",
-    note: "抵達日不想跑遠時使用。",
+    mapQuery: `night market near ${tripSettings.hotel.mapQuery}`,
+    note: `抵達日不想跑遠時使用，以 ${tripSettings.hotel.name} 附近為主。`,
   },
 ];
 
 const state = {
   travelerId: localStorage.getItem(STORAGE_KEYS.traveler),
-  activeTab: localStorage.getItem(STORAGE_KEYS.activeTab) || "today",
+  activeTab: normalizeActiveTab(localStorage.getItem(STORAGE_KEYS.activeTab) || "today"),
+  selectedDayIndex: readSavedDayIndex(),
   editingExpenseId: null,
   syncedDailyRoleDraws: null,
   syncedItineraryOverrides: null,
+  syncedCustomPlaces: null,
+  syncedCompletedStops: null,
+  syncedDecisionVotes: null,
+  syncedRandomDecisionPicks: null,
+  syncedDeletedCandidatePlaces: null,
   syncStatus: "本機模式",
   syncMessage: "尚未設定 Firebase，多人同步尚未啟用。",
   filters: {
     type: "全部",
     priority: "全部",
+  },
+  weather: {
+    status: "loading",
+    data: null,
+    message: "讀取曼谷天氣中",
   },
 };
 
@@ -290,6 +384,57 @@ function minutesLabel(minutes) {
   return rest ? `${hours} 小時 ${rest} 分鐘` : `${hours} 小時`;
 }
 
+function weatherCodeLabel(code) {
+  const labels = {
+    0: "晴朗",
+    1: "大致晴朗",
+    2: "局部多雲",
+    3: "多雲",
+    45: "有霧",
+    48: "霧霜",
+    51: "毛毛雨",
+    53: "毛毛雨",
+    55: "毛毛雨",
+    61: "小雨",
+    63: "中雨",
+    65: "大雨",
+    80: "陣雨",
+    81: "陣雨",
+    82: "強陣雨",
+    95: "雷雨",
+    96: "雷雨",
+    99: "雷雨",
+  };
+  return labels[code] || "天氣變化";
+}
+
+function weatherAdvice(weather) {
+  if (!weather) return "抵達前再確認一次天氣。";
+  if (weather.rainChance >= 60 || weather.precipitation > 0) return "可能有雨，帶傘比較穩。";
+  if (weather.uvIndex >= 8) return "紫外線偏強，防曬補水。";
+  if (weather.apparentTemperature >= 35) return "體感偏熱，排室內點休息。";
+  return "天氣可行，注意補水。";
+}
+
+function nearestHourlyValue(times = [], values = [], currentTime) {
+  if (!times.length || !values.length || !currentTime) return null;
+  const currentHour = currentTime.slice(0, 13);
+  const exactIndex = times.findIndex((time) => time.startsWith(currentHour));
+  if (exactIndex >= 0) return values[exactIndex];
+
+  const currentMs = new Date(currentTime).getTime();
+  let nearestIndex = 0;
+  let nearestDistance = Infinity;
+  times.forEach((time, index) => {
+    const distance = Math.abs(new Date(time).getTime() - currentMs);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  });
+  return values[nearestIndex] ?? null;
+}
+
 function getClientId() {
   let clientId = localStorage.getItem(STORAGE_KEYS.clientId);
   if (!clientId) {
@@ -318,8 +463,75 @@ function getTodayIndex() {
   return tripDays.length - 1;
 }
 
+function readSavedDayIndex() {
+  const savedIndex = Number(localStorage.getItem(STORAGE_KEYS.selectedDayIndex));
+  if (Number.isInteger(savedIndex) && savedIndex >= 0 && savedIndex < tripDays.length) {
+    return savedIndex;
+  }
+  return getTodayIndex();
+}
+
+function getSelectedDayIndex() {
+  if (Number.isInteger(state.selectedDayIndex) && state.selectedDayIndex >= 0 && state.selectedDayIndex < tripDays.length) {
+    return state.selectedDayIndex;
+  }
+  return getTodayIndex();
+}
+
+function normalizeActiveTab(tabId) {
+  const availableTabs = new Set(["today", "itinerary", "budget", "roles"]);
+  if (tabId === "candidates") return "itinerary";
+  return availableTabs.has(tabId) ? tabId : "today";
+}
+
+function setSelectedDayIndex(dayIndex) {
+  const nextIndex = Number(dayIndex);
+  if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= tripDays.length) return;
+  state.selectedDayIndex = nextIndex;
+  localStorage.setItem(STORAGE_KEYS.selectedDayIndex, String(nextIndex));
+  renderTravelerStatus();
+  renderActiveTab();
+}
+
+function readCustomPlaces() {
+  if (state.syncedCustomPlaces) {
+    return state.syncedCustomPlaces;
+  }
+
+  return readJsonStorage(STORAGE_KEYS.customPlaces, []);
+}
+
+async function writeCustomPlaces(customPlaces) {
+  writeJsonStorage(STORAGE_KEYS.customPlaces, customPlaces);
+  if (!sync.ready) return;
+
+  const { ref, set } = sync.databaseApi;
+  await set(ref(sync.database, `rooms/${SYNC_ROOM_ID}/customPlaces`), customPlaces);
+}
+
+function readDeletedCandidatePlaces() {
+  if (state.syncedDeletedCandidatePlaces) {
+    return state.syncedDeletedCandidatePlaces;
+  }
+
+  return readJsonStorage(STORAGE_KEYS.deletedCandidatePlaces, []);
+}
+
+async function writeDeletedCandidatePlaces(placeIds) {
+  const uniquePlaceIds = Array.from(new Set(placeIds));
+  writeJsonStorage(STORAGE_KEYS.deletedCandidatePlaces, uniquePlaceIds);
+  if (!sync.ready) return;
+
+  const { ref, set } = sync.databaseApi;
+  await set(ref(sync.database, `rooms/${SYNC_ROOM_ID}/deletedCandidatePlaces`), uniquePlaceIds);
+}
+
+function getAllPlaces() {
+  return [...places, ...readCustomPlaces()];
+}
+
 function getPlace(id) {
-  return places.find((place) => place.id === id);
+  return getAllPlaces().find((place) => place.id === id);
 }
 
 function getPlaceMapQuery(place) {
@@ -327,7 +539,17 @@ function getPlaceMapQuery(place) {
 }
 
 function googleMapsSearchUrl(place) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(getPlaceMapQuery(place))}`;
+  const mapQuery = getPlaceMapQuery(place);
+  if (/^https?:\/\//.test(mapQuery)) return mapQuery;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
+}
+
+function googleMapsNearbySearchUrl(place, keyword) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${keyword} near ${getPlaceMapQuery(place)}`)}`;
+}
+
+function googleMapsNearMeUrl(keyword) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${keyword} near me`)}`;
 }
 
 function googleMapsDirectionsUrl(routePlaces) {
@@ -405,6 +627,130 @@ function readItineraryOverrides() {
   }
 }
 
+function readJsonStorage(key, fallback = {}) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function readCompletedStops() {
+  if (state.syncedCompletedStops) {
+    return state.syncedCompletedStops;
+  }
+
+  return readJsonStorage(STORAGE_KEYS.completedStops, {});
+}
+
+async function writeCompletedStops(completedStops) {
+  writeJsonStorage(STORAGE_KEYS.completedStops, completedStops);
+  if (!sync.ready) return;
+
+  const { ref, set } = sync.databaseApi;
+  await set(ref(sync.database, `rooms/${SYNC_ROOM_ID}/completedStops`), completedStops);
+}
+
+function getCompletedStopIds(dayIndex) {
+  const day = tripDays[dayIndex];
+  const completedStops = readCompletedStops();
+  return completedStops[day.date] || [];
+}
+
+function getNextPlaceForDay(dayIndex, plannedPlaces) {
+  const completedIds = new Set(getCompletedStopIds(dayIndex));
+  return plannedPlaces.find((place) => !completedIds.has(place.id)) || plannedPlaces[0] || null;
+}
+
+async function markStopCompleted(dayIndex, placeId) {
+  const day = tripDays[dayIndex];
+  const completedStops = readCompletedStops();
+  const completedIds = new Set(completedStops[day.date] || []);
+  completedIds.add(placeId);
+  completedStops[day.date] = Array.from(completedIds);
+  await writeCompletedStops(completedStops);
+}
+
+function readDecisionVotes() {
+  if (state.syncedDecisionVotes) {
+    return state.syncedDecisionVotes;
+  }
+
+  return readJsonStorage(STORAGE_KEYS.decisionVotes, {});
+}
+
+async function writeDecisionVotes(votes) {
+  writeJsonStorage(STORAGE_KEYS.decisionVotes, votes);
+  if (!sync.ready) return;
+
+  const { ref, set } = sync.databaseApi;
+  await set(ref(sync.database, `rooms/${SYNC_ROOM_ID}/decisionVotes`), votes);
+}
+
+function readRandomDecisionPicks() {
+  if (state.syncedRandomDecisionPicks) {
+    return state.syncedRandomDecisionPicks;
+  }
+
+  return readJsonStorage(STORAGE_KEYS.randomDecisionPicks, {});
+}
+
+async function writeRandomDecisionPicks(picks) {
+  writeJsonStorage(STORAGE_KEYS.randomDecisionPicks, picks);
+  if (!sync.ready) return;
+
+  const { ref, set } = sync.databaseApi;
+  await set(ref(sync.database, `rooms/${SYNC_ROOM_ID}/randomDecisionPicks`), picks);
+}
+
+async function toggleDecisionVote(dayIndex, placeId) {
+  const traveler = getTraveler();
+  const day = tripDays[dayIndex];
+  const votes = readDecisionVotes();
+  const dayVotes = votes[day.date] || {};
+  const placeVotes = new Set(dayVotes[placeId] || []);
+
+  if (placeVotes.has(traveler.id)) {
+    placeVotes.delete(traveler.id);
+  } else {
+    placeVotes.add(traveler.id);
+  }
+
+  dayVotes[placeId] = Array.from(placeVotes);
+  votes[day.date] = dayVotes;
+  await writeDecisionVotes(votes);
+}
+
+async function setRandomDecisionPick(dayIndex, placeId) {
+  const day = tripDays[dayIndex];
+  const picks = readRandomDecisionPicks();
+  picks[day.date] = placeId;
+  await writeRandomDecisionPicks(picks);
+}
+
+function googleRandomPickUrl(pick) {
+  return googleMapsNearMeUrl(pick.query || pick.label || "popular places");
+}
+
+function nameFromGoogleMapsLink(link) {
+  try {
+    const url = new URL(link);
+    const placeMatch = url.pathname.match(/\/place\/([^/]+)/);
+    if (placeMatch?.[1]) {
+      return decodeURIComponent(placeMatch[1].replace(/\+/g, " ")).trim();
+    }
+    const query = url.searchParams.get("query") || url.searchParams.get("q");
+    if (query) return query.trim();
+  } catch {
+    return "";
+  }
+  return "";
+}
+
 async function writeItineraryOverrides(overrides) {
   localStorage.setItem(STORAGE_KEYS.itineraryOverrides, JSON.stringify(overrides));
   if (!sync.ready) return;
@@ -423,37 +769,48 @@ function getDayPlan(dayIndex) {
   const dayOverride = overrides[day.date] || { added: [], removed: [] };
   const added = dayOverride.added || [];
   const removed = dayOverride.removed || [];
+  const periods = dayOverride.periods || {};
   const plannedIds = uniqueIds([...day.planned, ...added]).filter((id) => !removed.includes(id));
   const backupIds = uniqueIds([...day.backups, ...removed]).filter((id) => !plannedIds.includes(id));
+  const withPeriodOverrides = (place) => ({
+    ...place,
+    period: periods[place.id] || place.period,
+  });
 
   return {
     plannedIds,
     backupIds,
-    plannedPlaces: plannedIds.map(getPlace).filter(Boolean),
+    plannedPlaces: plannedIds.map(getPlace).filter(Boolean).map(withPeriodOverrides),
     backupPlaces: backupIds.map(getPlace).filter(Boolean),
   };
 }
 
-async function updateTodayPlan(placeId, action) {
-  const day = tripDays[getTodayIndex()];
+async function updateTodayPlan(placeId, action, periodId) {
+  const day = tripDays[getSelectedDayIndex()];
   const overrides = readItineraryOverrides();
-  const current = overrides[day.date] || { added: [], removed: [] };
+  const current = overrides[day.date] || { added: [], removed: [], periods: {} };
   const added = new Set(current.added || []);
   const removed = new Set(current.removed || []);
+  const periods = { ...(current.periods || {}) };
 
   if (action === "add") {
     added.add(placeId);
     removed.delete(placeId);
+    if (dayPeriods.some((period) => period.id === periodId)) {
+      periods[placeId] = periodId;
+    }
   }
 
   if (action === "remove") {
     added.delete(placeId);
     removed.add(placeId);
+    delete periods[placeId];
   }
 
   overrides[day.date] = {
     added: Array.from(added),
     removed: Array.from(removed),
+    periods,
   };
 
   await writeItineraryOverrides(overrides);
@@ -472,6 +829,53 @@ function writeExpenses(expenses) {
   const allExpenses = JSON.parse(localStorage.getItem(STORAGE_KEYS.expenses) || "{}");
   allExpenses[state.travelerId] = expenses;
   localStorage.setItem(STORAGE_KEYS.expenses, JSON.stringify(allExpenses));
+}
+
+async function loadWeather() {
+  const params = new URLSearchParams({
+    latitude: String(BANGKOK_WEATHER.latitude),
+    longitude: String(BANGKOK_WEATHER.longitude),
+    current: "temperature_2m,apparent_temperature,precipitation,weather_code",
+    hourly: "precipitation_probability,uv_index",
+    forecast_days: "1",
+    timezone: "Asia/Bangkok",
+  });
+
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+    if (!response.ok) throw new Error(`Weather request failed: ${response.status}`);
+    const result = await response.json();
+    const current = result.current || {};
+    const hourly = result.hourly || {};
+    const rainChance = nearestHourlyValue(hourly.time, hourly.precipitation_probability, current.time);
+    const uvIndex = nearestHourlyValue(hourly.time, hourly.uv_index, current.time);
+
+    state.weather = {
+      status: "ready",
+      data: {
+        label: BANGKOK_WEATHER.label,
+        temperature: Math.round(current.temperature_2m),
+        apparentTemperature: Math.round(current.apparent_temperature),
+        precipitation: Number(current.precipitation || 0),
+        rainChance: Math.round(Number(rainChance || 0)),
+        uvIndex: Math.round(Number(uvIndex || 0)),
+        condition: weatherCodeLabel(current.weather_code),
+        updatedAt: current.time,
+      },
+      message: "",
+    };
+  } catch (error) {
+    console.error(error);
+    state.weather = {
+      status: "error",
+      data: null,
+      message: "天氣暫時讀不到",
+    };
+  }
+
+  if (state.travelerId && state.activeTab === "today") {
+    renderActiveTab();
+  }
 }
 
 function render() {
@@ -528,7 +932,8 @@ async function setTraveler(travelerId) {
 async function drawTodayRole() {
   if (!state.travelerId) return;
 
-  const day = tripDays[getTodayIndex()];
+  const dayIndex = getSelectedDayIndex();
+  const day = tripDays[dayIndex];
   const localDraws = readDailyRoleDraws();
   const currentAssignments = localDraws[day.date] || {};
 
@@ -539,7 +944,7 @@ async function drawTodayRole() {
   }
 
   if (!sync.ready) {
-    const availableRoles = getAvailableRoles(getTodayIndex(), currentAssignments);
+    const availableRoles = getAvailableRoles(dayIndex, currentAssignments);
     if (!availableRoles.length) {
       alert("今天的角色都已經被抽完了。");
       return;
@@ -562,7 +967,7 @@ async function drawTodayRole() {
     const nextAssignments = assignments || {};
     if (nextAssignments[state.travelerId]) return nextAssignments;
 
-    const availableRoles = getAvailableRoles(getTodayIndex(), nextAssignments);
+    const availableRoles = getAvailableRoles(dayIndex, nextAssignments);
     if (!availableRoles.length) return undefined;
 
     const role = availableRoles[Math.floor(Math.random() * availableRoles.length)];
@@ -579,22 +984,18 @@ async function drawTodayRole() {
 
 function renderTravelerStatus() {
   const traveler = getTraveler();
-  const dayIndex = getTodayIndex();
+  const dayIndex = getSelectedDayIndex();
   const role = getAssignedRoleForTraveler(traveler.id, dayIndex);
   const smokeRoll = getSmokeRollTraveler(dayIndex);
   const isSmokeRoll = smokeRoll.id === traveler.id;
+  const showSmokeRoll = dayIndex === getTodayIndex();
 
   travelerStatus.innerHTML = `
-    <div class="status-row">
-      <div>
-        <p class="eyebrow">你的身份</p>
-        <h2>${traveler.name}</h2>
-      </div>
+    <div class="traveler-status-line">
+      <strong>${traveler.name}</strong>
       <span class="pill ${traveler.color}">${role ? role.name : "今日未抽"}</span>
-    </div>
-    <div class="pill-row">
       <span class="pill">${tripDays[dayIndex].label}</span>
-      <span class="pill ${isSmokeRoll ? "gold" : ""}">${isSmokeRoll ? "你是今日煙捲" : `今日煙捲：${smokeRoll.name}`}</span>
+      ${showSmokeRoll ? `<span class="pill ${isSmokeRoll ? "gold" : ""}">${isSmokeRoll ? "你是今日煙捲" : `今日煙捲：${smokeRoll.name}`}</span>` : ""}
     </div>
     ${
       role
@@ -605,6 +1006,7 @@ function renderTravelerStatus() {
 }
 
 function renderActiveTab() {
+  state.activeTab = normalizeActiveTab(state.activeTab);
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.tab === state.activeTab);
   });
@@ -612,11 +1014,12 @@ function renderActiveTab() {
   const renderers = {
     today: renderToday,
     itinerary: renderItinerary,
-    candidates: renderCandidates,
     budget: renderBudget,
     roles: renderRoles,
   };
 
+  travelerStatus.classList.toggle("is-hidden", state.activeTab !== "today");
+  tabPanel.classList.toggle("compact-tab-panel", state.activeTab !== "today");
   tabPanel.innerHTML = renderers[state.activeTab]();
   bindTabEvents();
 }
@@ -624,7 +1027,7 @@ function renderActiveTab() {
 async function setupSync() {
   if (!sync.enabled) {
     state.syncStatus = "本機模式";
-    state.syncMessage = "貼上 Firebase config 後，每日角色抽籤和今日行程才會多人同步。";
+    state.syncMessage = "貼上 Firebase config 後，角色、行程和候補才會多人同步。";
     return;
   }
 
@@ -643,7 +1046,7 @@ async function setupSync() {
     sync.ready = true;
 
     state.syncStatus = "多人同步";
-    state.syncMessage = "每日角色抽籤與今日行程會同步給所有旅伴。";
+    state.syncMessage = "角色、行程、候補與完成狀態會同步給所有旅伴；預算保留個人本機。";
 
     const { ref, onValue } = databaseApi;
     onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/dailyRoleDraws`), (snapshot) => {
@@ -660,6 +1063,46 @@ async function setupSync() {
         renderActiveTab();
       }
     });
+
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/customPlaces`), (snapshot) => {
+      state.syncedCustomPlaces = snapshot.val() || [];
+      localStorage.setItem(STORAGE_KEYS.customPlaces, JSON.stringify(state.syncedCustomPlaces));
+      if (state.travelerId) {
+        renderActiveTab();
+      }
+    });
+
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/deletedCandidatePlaces`), (snapshot) => {
+      state.syncedDeletedCandidatePlaces = snapshot.val() || [];
+      localStorage.setItem(STORAGE_KEYS.deletedCandidatePlaces, JSON.stringify(state.syncedDeletedCandidatePlaces));
+      if (state.travelerId) {
+        renderActiveTab();
+      }
+    });
+
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/completedStops`), (snapshot) => {
+      state.syncedCompletedStops = snapshot.val() || {};
+      localStorage.setItem(STORAGE_KEYS.completedStops, JSON.stringify(state.syncedCompletedStops));
+      if (state.travelerId) {
+        renderActiveTab();
+      }
+    });
+
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/decisionVotes`), (snapshot) => {
+      state.syncedDecisionVotes = snapshot.val() || {};
+      localStorage.setItem(STORAGE_KEYS.decisionVotes, JSON.stringify(state.syncedDecisionVotes));
+      if (state.travelerId) {
+        renderActiveTab();
+      }
+    });
+
+    onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/randomDecisionPicks`), (snapshot) => {
+      state.syncedRandomDecisionPicks = snapshot.val() || {};
+      localStorage.setItem(STORAGE_KEYS.randomDecisionPicks, JSON.stringify(state.syncedRandomDecisionPicks));
+      if (state.travelerId) {
+        renderActiveTab();
+      }
+    });
   } catch (error) {
     console.error(error);
     sync.ready = false;
@@ -668,34 +1111,83 @@ async function setupSync() {
   }
 }
 
-function placeCard(place) {
-  const actionHtml =
-    place.action === "add"
-      ? `<button class="card-action add" type="button" data-add-today="${place.id}">加入今日</button>`
-      : place.action === "remove"
-        ? `<button class="card-action remove" type="button" data-remove-today="${place.id}">從今日移除</button>`
-        : "";
-
-  return `
-    <article class="card">
-      <div class="status-row">
-        <h3>${place.name}</h3>
-        <span class="pill">${place.status}</span>
-      </div>
-      <p>${place.note}</p>
-      <div class="meta-row">
+function placeCard(place, options = {}) {
+  const addLabel = options.compactActions ? "加入" : "加入今日";
+  const removeLabel = options.removeLabel || (options.compactActions ? "移除" : "從今日移除");
+  const mapLabel = options.compactActions ? "地圖" : "開啟 Google Maps";
+  const toneClass = options.featured ? placeToneClass(place) : "";
+  const metaHtml = options.minimalMeta
+    ? `<span class="meta">${place.type}</span>`
+    : `
         <span class="meta">${place.type}</span>
         <span class="meta">${place.area}</span>
         <span class="meta">${minutesLabel(place.duration)}</span>
         <span class="meta">${money(place.cost)}</span>
         <span class="meta">優先度 ${place.priority}</span>
+      `;
+  const mapLinkHtml =
+    options.hideMapLink
+      ? ""
+      : `<a class="map-link" href="${googleMapsSearchUrl(place)}" target="_blank" rel="noopener">${mapLabel}</a>`;
+  const actionHtml =
+    place.action === "add"
+      ? `<button class="card-action add" type="button" data-add-today="${place.id}">${addLabel}</button>`
+      : place.action === "remove"
+        ? `<button class="card-action remove" type="button" data-remove-today="${place.id}">${removeLabel}</button>`
+        : "";
+
+  return `
+    <article class="card ${options.featured ? "today-place-card" : ""} ${toneClass}">
+      <div class="status-row">
+        <h3>${place.name}</h3>
+        ${options.hideStatus ? "" : `<span class="pill">${place.status}</span>`}
       </div>
-      <div class="place-actions">
+      ${options.hideNote ? "" : `<p>${place.note}</p>`}
+      ${options.hideMeta ? "" : `<div class="meta-row">${metaHtml}</div>`}
+      <div class="place-actions ${options.compactActions ? "today-card-actions" : ""}">
         ${actionHtml}
-        <a class="map-link" href="${googleMapsSearchUrl(place)}" target="_blank" rel="noopener">開啟 Google Maps</a>
+        ${mapLinkHtml}
       </div>
     </article>
   `;
+}
+
+function compactPlaceCard(place) {
+  const actionHtml =
+    place.action === "add"
+      ? `<button class="compact-action add" type="button" data-add-today="${place.id}">加入行程</button>`
+      : place.action === "remove"
+        ? `<button class="compact-action remove" type="button" data-remove-today="${place.id}">移除</button>`
+        : "";
+  const deleteHtml = `<button class="compact-action delete" type="button" data-delete-place="${place.id}" aria-label="刪除 ${place.name}">刪除</button>`;
+  const metaParts = [place.type, place.id.startsWith("custom-") ? "" : place.area].filter(Boolean);
+
+  return `
+    <article class="compact-place-card">
+      <div>
+        <h3>${place.name}</h3>
+        <div class="compact-meta">
+          ${metaParts.map((part) => `<span>${part}</span>`).join("")}
+        </div>
+      </div>
+      <div class="compact-actions">
+        ${actionHtml}
+        <a href="${googleMapsSearchUrl(place)}" target="_blank" rel="noopener" aria-label="在 Google Maps 開啟 ${place.name}">地圖</a>
+        ${deleteHtml}
+      </div>
+    </article>
+  `;
+}
+
+function placeToneClass(place) {
+  const type = place.type || "";
+  if (type.includes("餐")) return "tone-food";
+  if (type.includes("購")) return "tone-shopping";
+  if (type.includes("活動")) return "tone-activity";
+  if (type.includes("景")) return "tone-sight";
+  if (type.includes("航") || type.includes("交通")) return "tone-transit";
+  if (type.includes("住宿")) return "tone-stay";
+  return "tone-default";
 }
 
 function renderTodayMap(plannedPlaces) {
@@ -703,10 +1195,10 @@ function renderTodayMap(plannedPlaces) {
     return `
       <article class="card map-card">
         <div class="status-row">
-          <h3>今日路線地圖</h3>
+          <h3>路線</h3>
           <span class="pill blue">Google Maps</span>
         </div>
-        <p>今日行程至少需要 2 個地點，才會產生路線。</p>
+        <p>2 個地點後產生路線。</p>
       </article>
     `;
   }
@@ -718,10 +1210,9 @@ function renderTodayMap(plannedPlaces) {
     return `
       <article class="card map-card">
         <div class="status-row">
-          <h3>今日路線地圖</h3>
-          <span class="pill gold">未設定 key</span>
+          <h3>路線</h3>
         </div>
-        <p>目前尚未設定 Google Maps Embed API key，先用外部 Google Maps 開啟今日路線。</p>
+        <p>使用外部 Google Maps。</p>
         <a class="map-button" href="${directionsUrl}" target="_blank" rel="noopener">開啟今日路線</a>
       </article>
     `;
@@ -730,7 +1221,7 @@ function renderTodayMap(plannedPlaces) {
   return `
     <article class="card map-card">
       <div class="status-row">
-        <h3>今日路線地圖</h3>
+        <h3>路線</h3>
         <span class="pill blue">自動更新</span>
       </div>
       <iframe
@@ -746,129 +1237,324 @@ function renderTodayMap(plannedPlaces) {
   `;
 }
 
-function renderToday() {
-  const dayIndex = getTodayIndex();
-  const day = tripDays[dayIndex];
-  const traveler = getTraveler();
-  const role = getAssignedRoleForTraveler(traveler.id, dayIndex);
-  const smokeRoll = getSmokeRollTraveler(dayIndex);
-  const { plannedPlaces, backupPlaces } = getDayPlan(dayIndex);
-  const dailyCost = [...plannedPlaces, ...backupPlaces].reduce((sum, place) => sum + place.cost, 0);
+function getPeriodPlaces(placesForDay, periodId) {
+  return placesForDay.filter((place) => place.period === periodId);
+}
+
+function renderTodayPeriod(period, plannedPlaces) {
+  const periodPlaces = getPeriodPlaces(plannedPlaces, period.id);
+  if (!periodPlaces.length) return "";
 
   return `
-    <h2 class="section-title">今日</h2>
-    <article class="card">
-      <p class="eyebrow">${day.type === "flight" ? "移動日" : "主要遊玩日"}</p>
-      <h3>${day.label}</h3>
-      <p>${day.note}</p>
-      <div class="pill-row">
-        <span class="pill green">${role ? role.name : "今日角色未抽"}</span>
-        <span class="pill gold">煙捲：${smokeRoll.name}</span>
-        <span class="pill blue">預估 ${money(dailyCost)}</span>
+    <section class="today-period">
+      <div class="place-list">
+        ${
+          periodPlaces
+            .map((place) =>
+              placeCard(
+                { ...place, status: "今日", action: "remove" },
+                { featured: true, hideNote: true, hideStatus: true, hideMeta: true, compactActions: true, minimalMeta: true },
+              ),
+            )
+            .join("")
+        }
       </div>
-      ${
-        role
-          ? ""
-          : `<button class="draw-role-button" type="button" data-draw-today-role>抽今日角色</button>`
-      }
-    </article>
-    ${renderTodayMap(plannedPlaces)}
-    <h2 class="section-title">預排行程</h2>
-    <div class="place-list">
-      ${
-        plannedPlaces.length
-          ? plannedPlaces.map((place) => placeCard({ ...place, status: "今日行程", action: "remove" })).join("")
-          : `<div class="empty-state">這天還沒有排定正式行程，等大家收集完想去的地方後再放進來。</div>`
-      }
-    </div>
-    <h2 class="section-title">候補選項</h2>
-    <div class="place-list">
-      ${
-        backupPlaces.length
-          ? backupPlaces.map((place) => placeCard({ ...place, status: "候補", action: "add" })).join("")
-          : `<div class="empty-state">這天暫時沒有候補地點。</div>`
-      }
-    </div>
+    </section>
   `;
 }
 
-function renderItinerary() {
+function renderDaySwitcher(activeDayIndex) {
   return `
-    <h2 class="section-title">行程</h2>
-    <div class="day-list">
+    <div class="day-switcher" aria-label="選擇查看日期">
       ${tripDays
-        .map((day, dayIndex) => {
-          const { plannedPlaces, backupPlaces } = getDayPlan(dayIndex);
-          const estimatedCost = [...plannedPlaces, ...backupPlaces].reduce((sum, place) => sum + place.cost, 0);
-          return `
-            <article class="card">
-              <div class="status-row">
-                <div>
-                  <p class="eyebrow">${day.type === "flight" ? "Flight" : "Explore"}</p>
-                  <h3>${day.label}</h3>
-                </div>
-                <span class="pill ${day.type === "flight" ? "blue" : "green"}">${day.type === "flight" ? "移動日" : "遊玩日"}</span>
-              </div>
-              <p>${day.note}</p>
-              <div class="meta-row">
-                <span class="meta">預排 ${plannedPlaces.length} 個</span>
-                <span class="meta">候補 ${backupPlaces.length} 個</span>
-                <span class="meta">參考 ${money(estimatedCost)}</span>
-              </div>
-              <div class="place-list">
-                ${plannedPlaces.map(placeCard).join("") || `<div class="empty-state">尚未排入正式景點。</div>`}
-              </div>
-            </article>
-          `;
-        })
+        .map(
+          (day, index) => `
+            <button
+              class="${index === activeDayIndex ? "is-active" : ""}"
+              type="button"
+              data-select-day="${index}"
+              aria-pressed="${index === activeDayIndex ? "true" : "false"}"
+            >
+              <span>${day.label.split(" ")[0]}</span>
+            </button>
+          `,
+        )
         .join("")}
     </div>
   `;
 }
 
-function renderCandidates() {
-  const types = ["全部", ...Array.from(new Set(places.map((place) => place.type)))];
-  const priorities = ["全部", ...Array.from(new Set(places.map((place) => place.priority)))];
-  const todayPlan = getDayPlan(getTodayIndex());
-  const todayPlannedIds = new Set(todayPlan.plannedIds);
-  const filteredPlaces = places.filter((place) => {
+function renderWeatherCard() {
+  if (state.weather.status === "loading") {
+    return `
+      <article class="weather-card is-loading">
+        <div>
+          <p class="eyebrow">Weather</p>
+          <h3>曼谷天氣</h3>
+        </div>
+        <span>讀取中</span>
+      </article>
+    `;
+  }
+
+  if (state.weather.status === "error" || !state.weather.data) {
+    return `
+      <article class="weather-card is-error">
+        <div>
+          <p class="eyebrow">Weather</p>
+          <h3>曼谷天氣</h3>
+        </div>
+        <span>${state.weather.message}</span>
+      </article>
+    `;
+  }
+
+  const weather = state.weather.data;
+  return `
+    <article class="weather-card">
+      <div class="weather-main">
+        <div>
+          <p class="eyebrow">Weather</p>
+          <h3>${weather.label} ${weather.condition}</h3>
+        </div>
+        <strong>${weather.temperature}°</strong>
+      </div>
+      <div class="weather-metrics">
+        <span>體感 ${weather.apparentTemperature}°</span>
+        <span>降雨 ${weather.rainChance}%</span>
+        <span>UV ${weather.uvIndex}</span>
+      </div>
+      <p>${weatherAdvice(weather)}</p>
+    </article>
+  `;
+}
+
+function renderTripSummary(dayIndex, plannedPlaces) {
+  const day = tripDays[dayIndex];
+  const nextPlace = getNextPlaceForDay(dayIndex, plannedPlaces);
+  return `
+    <article class="trip-summary-card">
+      <div>
+        <p class="eyebrow">${day.date}</p>
+        <h2>${day.label}</h2>
+        <p>${nextPlace ? `下一站：${nextPlace.name}` : day.note}</p>
+      </div>
+    </article>
+  `;
+}
+
+function renderNextPlaceCard(dayIndex, plannedPlaces) {
+  const nextPlace = getNextPlaceForDay(dayIndex, plannedPlaces);
+  const completedCount = getCompletedStopIds(dayIndex).filter((placeId) => plannedPlaces.some((place) => place.id === placeId)).length;
+
+  if (!nextPlace) {
+    return `
+      <article class="next-place-card">
+        <p class="eyebrow">Next Stop</p>
+        <h3>今天還沒排下一站</h3>
+        <p>到行程頁從候補總覽加入行程。</p>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="next-place-card">
+      <div>
+        <p class="eyebrow">Next Stop</p>
+        <h3>${nextPlace.name}</h3>
+        <p>${completedCount}/${plannedPlaces.length} 已完成 · ${nextPlace.type}</p>
+      </div>
+      <div class="next-place-actions">
+        <a href="${googleMapsSearchUrl(nextPlace)}" target="_blank" rel="noopener">前往</a>
+        <button type="button" data-complete-stop="${nextPlace.id}">完成</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderTravelTools() {
+  return `
+    <section class="travel-tool-grid" aria-label="即時旅行工具">
+      <a href="${googleMapsNearMeUrl("convenience store")}" target="_blank" rel="noopener">
+        <span>附近</span>
+        <strong>便利</strong>
+      </a>
+      <a href="${googleMapsNearMeUrl("restaurants")}" target="_blank" rel="noopener">
+        <span>附近</span>
+        <strong>美食</strong>
+      </a>
+      <a href="${googleMapsNearMeUrl("cannabis dispensary")}" target="_blank" rel="noopener">
+        <span>附近</span>
+        <strong>草本</strong>
+      </a>
+    </section>
+  `;
+}
+
+function renderTodayInfoStack(dayIndex, plannedPlaces) {
+  return `
+    <section class="today-info-stack">
+      ${renderWeatherCard()}
+      ${renderNextPlaceCard(dayIndex, plannedPlaces)}
+    </section>
+  `;
+}
+
+function renderWeatherInline() {
+  if (state.weather.status === "loading") {
+    return `
+      <div class="today-weather-inline">
+        <span>曼谷天氣</span>
+        <strong>讀取中</strong>
+      </div>
+    `;
+  }
+
+  if (state.weather.status === "error" || !state.weather.data) {
+    return `
+      <div class="today-weather-inline">
+        <span>曼谷天氣</span>
+        <strong>${state.weather.message}</strong>
+      </div>
+    `;
+  }
+
+  const weather = state.weather.data;
+  return `
+    <div class="today-weather-inline">
+      <span>${weather.label} ${weather.condition}</span>
+      <strong>${weather.temperature}°</strong>
+      <small>體感 ${weather.apparentTemperature}° · 降雨 ${weather.rainChance}% · UV ${weather.uvIndex}</small>
+    </div>
+  `;
+}
+
+function renderTodayCommandCard(dayIndex, plannedPlaces) {
+  const nextPlace = getNextPlaceForDay(dayIndex, plannedPlaces);
+  const completedCount = getCompletedStopIds(dayIndex).filter((placeId) => plannedPlaces.some((place) => place.id === placeId)).length;
+
+  return `
+    <section class="today-command-card">
+      <div class="today-next-block">
+        <div class="today-next-label">
+          <p>下一站</p>
+          <span>${completedCount}/${plannedPlaces.length}</span>
+        </div>
+        <h3>${nextPlace ? nextPlace.name : "今天還沒排下一站"}</h3>
+      </div>
+
+      ${
+        nextPlace
+          ? `<div class="today-command-actions">
+              <a href="${googleMapsSearchUrl(nextPlace)}" target="_blank" rel="noopener">前往</a>
+              <button type="button" data-complete-stop="${nextPlace.id}">完成</button>
+            </div>`
+          : ""
+      }
+
+      <div class="today-utility-panel">
+        ${renderWeatherInline()}
+        ${renderTravelTools()}
+      </div>
+    </section>
+  `;
+}
+
+function renderGoogleMapsPlaceTool() {
+  return `
+    <section class="google-place-card">
+      <div>
+        <p class="eyebrow">Google Maps</p>
+        <h3>貼上店家連結</h3>
+        <p>填入地點名稱並貼上 Google Maps 連結，加入候補行程總覽。</p>
+      </div>
+      <form class="google-place-form" id="googlePlaceForm">
+        <label class="field google-place-name">
+          <span>地點名稱</span>
+          <input name="placeName" placeholder="例如 The One Ratchada" autocomplete="off" required />
+        </label>
+        <label class="field google-place-name">
+          <span>Google Maps 連結</span>
+          <input name="mapsLink" placeholder="貼上店家地址連結" autocomplete="off" required />
+        </label>
+        <div class="button-row">
+          <a class="secondary-button google-place-search-link" href="${googleMapsNearMeUrl("popular places restaurants shopping mall attractions")}" target="_blank" rel="noopener">開啟地圖</a>
+          <button class="primary-button" type="submit">加入候補</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderToday() {
+  const dayIndex = getSelectedDayIndex();
+  const { plannedPlaces } = getDayPlan(dayIndex);
+  const todayPlanHtml = dayPeriods.map((period) => renderTodayPeriod(period, plannedPlaces)).join("");
+
+  return `
+    <h2 class="section-title">今日</h2>
+    ${renderDaySwitcher(dayIndex)}
+    ${renderTodayCommandCard(dayIndex, plannedPlaces)}
+    <section class="trip-sheet">
+      <h2 class="section-title">今日行程</h2>
+      <div class="today-period-list">
+        ${todayPlanHtml || `<div class="empty-state compact-empty">今天還沒有排定行程。</div>`}
+      </div>
+    </section>
+    ${renderTodayMap(plannedPlaces)}
+  `;
+}
+
+function renderItinerary() {
+  const dayIndex = getSelectedDayIndex();
+  const day = tripDays[dayIndex];
+  const { plannedIds, plannedPlaces } = getDayPlan(dayIndex);
+  const plannedIdSet = new Set(plannedIds);
+  const allPlaces = getAllPlaces();
+  const deletedCandidateIds = new Set(readDeletedCandidatePlaces());
+  const types = ["全部", ...Array.from(new Set(allPlaces.map((place) => place.type)))];
+  const backupPlaces = allPlaces.filter((place) => {
     const typeMatch = state.filters.type === "全部" || place.type === state.filters.type;
-    const priorityMatch = state.filters.priority === "全部" || place.priority === state.filters.priority;
-    return typeMatch && priorityMatch;
+    const shouldShowSuggestion = place.id.startsWith("custom-") || starterSuggestionIds.has(place.id);
+    return shouldShowSuggestion && !deletedCandidateIds.has(place.id) && !plannedIdSet.has(place.id) && typeMatch;
   });
 
   return `
-    <h2 class="section-title">候補池</h2>
-    <div class="filters">
-      <label class="field">
-        <span>類型</span>
-        <select id="typeFilter">
-          ${types.map((type) => `<option value="${type}" ${type === state.filters.type ? "selected" : ""}>${type}</option>`).join("")}
-        </select>
-      </label>
-      <label class="field">
-        <span>優先度</span>
-        <select id="priorityFilter">
-          ${priorities.map((priority) => `<option value="${priority}" ${priority === state.filters.priority ? "selected" : ""}>${priority}</option>`).join("")}
-        </select>
-      </label>
-    </div>
-    <div class="place-list">
-      ${
-        filteredPlaces.length
-          ? filteredPlaces
-              .map((place) =>
-                placeCard({
-                  ...place,
-                  status: todayPlannedIds.has(place.id) ? "今日行程" : place.status,
-                  action: todayPlannedIds.has(place.id) ? "remove" : "add",
-                }),
-              )
-              .join("")
-          : `<div class="empty-state">目前沒有符合條件的候補地點。</div>`
-      }
-    </div>
+    <article class="card pass-card">
+      <div class="status-row">
+        <div>
+          <p class="eyebrow">${day.type === "flight" ? "Flight" : "Explore"}</p>
+          <h3>${day.label}</h3>
+        </div>
+        <span class="pill ${day.type === "flight" ? "blue" : "green"}">${day.type === "flight" ? "移動日" : "遊玩日"}</span>
+      </div>
+      <p>${day.note}</p>
+    </article>
+    ${renderDaySwitcher(dayIndex)}
+    ${renderGoogleMapsPlaceTool()}
+    <section class="trip-sheet backup-sheet">
+      <h2 class="section-title secondary-title">候補行程總覽</h2>
+      <div class="filters">
+        <label class="field">
+          <span>類型</span>
+          <select id="typeFilter">
+            ${types.map((type) => `<option value="${type}" ${type === state.filters.type ? "selected" : ""}>${type}</option>`).join("")}
+          </select>
+        </label>
+      </div>
+      <div class="compact-place-list">
+        ${
+          backupPlaces.length
+            ? backupPlaces.map((place) => compactPlaceCard({ ...place, status: "候補", action: "add" })).join("")
+            : `<div class="empty-state">目前沒有符合條件的候補地點。</div>`
+        }
+      </div>
+    </section>
   `;
+}
+
+function renderCandidates() {
+  return renderItinerary();
 }
 
 function renderBudget() {
@@ -879,8 +1565,11 @@ function renderBudget() {
   const editingExpense = expenses.find((expense) => expense.id === state.editingExpenseId);
 
   return `
-    <h2 class="section-title">我的預算</h2>
-    <article class="card">
+    <div class="page-heading">
+      <p class="eyebrow">Budget</p>
+      <h2 class="section-title">預算</h2>
+    </div>
+    <article class="card budget-summary-card">
       <div class="status-row">
         <div>
           <p class="eyebrow">每人預算</p>
@@ -894,7 +1583,7 @@ function renderBudget() {
       </div>
       <div class="budget-meter" aria-label="預算使用比例"><span style="width:${percentage}%"></span></div>
     </article>
-    <form class="form-card" id="expenseForm">
+    <form class="form-card expense-form-card" id="expenseForm">
       <h3>${editingExpense ? "修改支出" : "新增支出"}</h3>
       <div class="form-grid">
         <label class="field">
@@ -929,7 +1618,7 @@ function renderBudget() {
         </div>
       </div>
     </form>
-    <div class="expense-list">
+    <div class="expense-list budget-list">
       ${expenses.length ? expenses.map(expenseCard).join("") : `<div class="empty-state">還沒有支出紀錄。旅途中每花一筆就記一下，預算會自己更新。</div>`}
     </div>
   `;
@@ -937,7 +1626,7 @@ function renderBudget() {
 
 function expenseCard(expense) {
   return `
-    <article class="card">
+    <article class="card expense-card">
       <div class="expense-row">
         <div>
           <h3>${expense.category} ${money(expense.amount)}</h3>
@@ -953,20 +1642,25 @@ function expenseCard(expense) {
 }
 
 function renderRoles() {
-  const dayIndex = getTodayIndex();
+  const dayIndex = getSelectedDayIndex();
   const day = tripDays[dayIndex];
   const smokeRoll = getSmokeRollTraveler(dayIndex);
+  const showSmokeRoll = dayIndex === getTodayIndex();
 
   return `
-    <h2 class="section-title">今日角色</h2>
+    <div class="page-heading">
+      <p class="eyebrow">Crew Roles</p>
+      <h2 class="section-title">角色</h2>
+    </div>
+    ${renderDaySwitcher(dayIndex)}
     <div class="role-list">
-      <article class="card">
+      <article class="card roles-card">
         <div class="status-row">
           <div>
             <p class="eyebrow">${day.date}</p>
             <h3>${day.label}</h3>
           </div>
-          <span class="pill gold">煙捲：${smokeRoll.name}</span>
+          ${showSmokeRoll ? `<span class="pill gold">煙捲：${smokeRoll.name}</span>` : ""}
         </div>
         <div class="place-list">
           ${travelers
@@ -988,8 +1682,8 @@ function renderRoles() {
 
 function bindTabEvents() {
   const typeFilter = document.querySelector("#typeFilter");
-  const priorityFilter = document.querySelector("#priorityFilter");
   const expenseForm = document.querySelector("#expenseForm");
+  const googlePlaceForm = document.querySelector("#googlePlaceForm");
   const cancelExpenseButton = document.querySelector("#cancelExpenseButton");
 
   if (typeFilter) {
@@ -999,15 +1693,12 @@ function bindTabEvents() {
     });
   }
 
-  if (priorityFilter) {
-    priorityFilter.addEventListener("change", (event) => {
-      state.filters.priority = event.target.value;
-      renderActiveTab();
-    });
-  }
-
   if (expenseForm) {
     expenseForm.addEventListener("submit", handleExpenseSubmit);
+  }
+
+  if (googlePlaceForm) {
+    googlePlaceForm.addEventListener("submit", handleGooglePlaceLinkSubmit);
   }
 
   if (cancelExpenseButton) {
@@ -1017,6 +1708,12 @@ function bindTabEvents() {
       renderActiveTab();
     });
   }
+
+  document.querySelectorAll("[data-select-day]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setSelectedDayIndex(Number(button.dataset.selectDay));
+    });
+  });
 
   document.querySelectorAll("[data-edit-expense]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1035,7 +1732,7 @@ function bindTabEvents() {
 
   document.querySelectorAll("[data-add-today]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await updateTodayPlan(button.dataset.addToday, "add");
+      await updateTodayPlan(button.dataset.addToday, "add", button.dataset.period);
       renderTravelerStatus();
       renderActiveTab();
     });
@@ -1045,6 +1742,21 @@ function bindTabEvents() {
     button.addEventListener("click", async () => {
       await updateTodayPlan(button.dataset.removeToday, "remove");
       renderTravelerStatus();
+      renderActiveTab();
+    });
+  });
+
+  document.querySelectorAll("[data-delete-place]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await deleteCandidatePlace(button.dataset.deletePlace);
+      renderTravelerStatus();
+      renderActiveTab();
+    });
+  });
+
+  document.querySelectorAll("[data-complete-stop]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await markStopCompleted(getSelectedDayIndex(), button.dataset.completeStop);
       renderActiveTab();
     });
   });
@@ -1089,6 +1801,69 @@ function handleExpenseSubmit(event) {
   renderActiveTab();
 }
 
+async function handleGooglePlaceLinkSubmit(event) {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  const typedPlaceName = String(formData.get("placeName") || "").trim();
+  const mapsLink = String(formData.get("mapsLink") || "").trim();
+
+  if (!typedPlaceName) {
+    alert("請輸入地點名稱。");
+    return;
+  }
+
+  if (!mapsLink) {
+    alert("請貼上 Google Maps 店家地址連結。");
+    return;
+  }
+
+  const customPlaces = readCustomPlaces();
+  const placeName = typedPlaceName || nameFromGoogleMapsLink(mapsLink) || `Google Maps 地點 ${customPlaces.length + 1}`;
+  const newPlace = {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: placeName,
+    type: "自訂",
+    area: "Google Maps",
+    period: "afternoon",
+    duration: 90,
+    cost: 0,
+    priority: "自訂",
+    status: "候補",
+    mapQuery: mapsLink,
+    note: "從 Google Maps 連結加入候補。",
+  };
+
+  await writeCustomPlaces([newPlace, ...customPlaces]);
+  event.currentTarget.reset();
+  renderActiveTab();
+}
+
+async function deleteCandidatePlace(placeId) {
+  if (!placeId) return;
+
+  if (placeId.startsWith("custom-")) {
+    const nextCustomPlaces = readCustomPlaces().filter((place) => place.id !== placeId);
+    await writeCustomPlaces(nextCustomPlaces);
+  } else {
+    const deletedCandidateIds = readDeletedCandidatePlaces();
+    await writeDeletedCandidatePlaces([...deletedCandidateIds, placeId]);
+  }
+
+  const overrides = readItineraryOverrides();
+  Object.keys(overrides).forEach((date) => {
+    const dayOverride = overrides[date] || {};
+    const periods = { ...(dayOverride.periods || {}) };
+    delete periods[placeId];
+    overrides[date] = {
+      ...dayOverride,
+      added: (dayOverride.added || []).filter((id) => id !== placeId),
+      removed: (dayOverride.removed || []).filter((id) => id !== placeId),
+      periods,
+    };
+  });
+  await writeItineraryOverrides(overrides);
+}
+
 travelerDrawGrid.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-traveler]");
   if (!button) return;
@@ -1098,7 +1873,7 @@ travelerDrawGrid.addEventListener("click", async (event) => {
 bottomNav.addEventListener("click", (event) => {
   const button = event.target.closest("[data-tab]");
   if (!button) return;
-  state.activeTab = button.dataset.tab;
+  state.activeTab = normalizeActiveTab(button.dataset.tab);
   localStorage.setItem(STORAGE_KEYS.activeTab, state.activeTab);
   renderActiveTab();
 });
@@ -1112,3 +1887,4 @@ resetTravelerButton.addEventListener("click", () => {
 
 await setupSync();
 render();
+loadWeather();
