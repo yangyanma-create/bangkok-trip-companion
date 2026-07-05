@@ -336,6 +336,7 @@ const state = {
   activeTab: normalizeActiveTab(localStorage.getItem(STORAGE_KEYS.activeTab) || "today"),
   selectedDayIndex: readSavedDayIndex(),
   editingExpenseId: null,
+  pendingDeletePlaceId: null,
   syncedDailyRoleDraws: null,
   syncedItineraryOverrides: null,
   syncedCustomPlaces: null,
@@ -538,35 +539,68 @@ function getPlaceMapQuery(place) {
   return place.mapQuery || `${place.name}, Bangkok, Thailand`;
 }
 
+function isHttpUrl(value) {
+  return /^https?:\/\//.test(String(value || ""));
+}
+
+function googleMapsQueryFromUrl(link) {
+  if (!isHttpUrl(link)) return "";
+
+  try {
+    const url = new URL(link);
+    const coordinateMatch = url.href.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+    if (coordinateMatch) return `${coordinateMatch[1]},${coordinateMatch[2]}`;
+
+    const query = url.searchParams.get("query") || url.searchParams.get("q");
+    if (query) return query.trim();
+
+    const placeMatch = url.pathname.match(/\/place\/([^/]+)/);
+    if (placeMatch?.[1]) {
+      return decodeURIComponent(placeMatch[1].replace(/\+/g, " ")).trim();
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
+function isLegacyCustomNameQuery(place, query) {
+  return place.id?.startsWith("custom-") && query === `${place.name}, Bangkok, Thailand`;
+}
+
 function getPlaceDirectionsQuery(place) {
-  if (place.directionsQuery) return place.directionsQuery;
+  const queryFromSourceUrl = googleMapsQueryFromUrl(place.sourceMapUrl);
+  if (place.id?.startsWith("custom-") && queryFromSourceUrl) return queryFromSourceUrl;
+
+  if (place.directionsQuery && !isLegacyCustomNameQuery(place, place.directionsQuery)) return place.directionsQuery;
 
   const mapQuery = getPlaceMapQuery(place);
-  if (/^https?:\/\//.test(mapQuery)) {
-    try {
-      const url = new URL(mapQuery);
-      const query = url.searchParams.get("q") || url.searchParams.get("query");
-      if (query) return query;
-    } catch {
-      return `${place.name}, Bangkok, Thailand`;
-    }
-    return `${place.name}, Bangkok, Thailand`;
+  if (isHttpUrl(mapQuery)) {
+    const queryFromMapUrl = googleMapsQueryFromUrl(mapQuery);
+    if (queryFromMapUrl) return queryFromMapUrl;
+    return place.id?.startsWith("custom-") ? "" : `${place.name}, Bangkok, Thailand`;
   }
+
+  if (isLegacyCustomNameQuery(place, mapQuery)) return "";
   return mapQuery;
 }
 
 function googleMapsSearchUrl(place) {
+  if (place.id?.startsWith("custom-") && isHttpUrl(place.sourceMapUrl)) return place.sourceMapUrl;
+
   const mapQuery = getPlaceMapQuery(place);
   const searchQuery = getPlaceDirectionsQuery(place);
-  if (searchQuery && !/^https?:\/\//.test(searchQuery)) {
+  if (searchQuery && !isHttpUrl(searchQuery)) {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
   }
-  if (/^https?:\/\//.test(mapQuery)) return mapQuery;
+  if (isHttpUrl(mapQuery)) return mapQuery;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 }
 
 function googleMapsNearbySearchUrl(place, keyword) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${keyword} near ${getPlaceDirectionsQuery(place)}`)}`;
+  const placeQuery = getPlaceDirectionsQuery(place) || place.name;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${keyword} near ${placeQuery}`)}`;
 }
 
 function googleMapsNearMeUrl(keyword) {
@@ -574,14 +608,17 @@ function googleMapsNearMeUrl(keyword) {
 }
 
 function googleMapsDirectionsUrl(routePlaces) {
-  const validPlaces = routePlaces.filter(Boolean);
+  const validPlaces = routePlaces
+    .filter(Boolean)
+    .map((place) => ({ place, query: getPlaceDirectionsQuery(place) }))
+    .filter(({ query }) => query);
   if (validPlaces.length < 2) return "";
 
-  const origin = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[0]));
-  const destination = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[validPlaces.length - 1]));
+  const origin = encodeURIComponent(validPlaces[0].query);
+  const destination = encodeURIComponent(validPlaces[validPlaces.length - 1].query);
   const waypoints = validPlaces
     .slice(1, -1)
-    .map(getPlaceDirectionsQuery)
+    .map(({ query }) => query)
     .map(encodeURIComponent)
     .join("|");
   const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
@@ -590,14 +627,17 @@ function googleMapsDirectionsUrl(routePlaces) {
 }
 
 function googleMapsEmbedDirectionsUrl(routePlaces) {
-  const validPlaces = routePlaces.filter(Boolean);
+  const validPlaces = routePlaces
+    .filter(Boolean)
+    .map((place) => ({ place, query: getPlaceDirectionsQuery(place) }))
+    .filter(({ query }) => query);
   if (!GOOGLE_MAPS_EMBED_API_KEY || validPlaces.length < 2) return "";
 
-  const origin = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[0]));
-  const destination = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[validPlaces.length - 1]));
+  const origin = encodeURIComponent(validPlaces[0].query);
+  const destination = encodeURIComponent(validPlaces[validPlaces.length - 1].query);
   const waypoints = validPlaces
     .slice(1, -1)
-    .map(getPlaceDirectionsQuery)
+    .map(({ query }) => query)
     .map(encodeURIComponent)
     .join("|");
   const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
@@ -1186,7 +1226,8 @@ function compactPlaceCard(place) {
       : place.action === "remove"
         ? `<button class="compact-action remove" type="button" data-remove-today="${place.id}">移除</button>`
         : "";
-  const deleteHtml = `<button class="compact-action delete" type="button" data-delete-place="${place.id}" aria-label="刪除 ${place.name}">刪除</button>`;
+  const isPendingDelete = state.pendingDeletePlaceId === place.id;
+  const deleteHtml = `<button class="compact-action delete ${isPendingDelete ? "is-confirming" : ""}" type="button" data-delete-place="${place.id}" aria-label="${isPendingDelete ? "確認刪除" : "刪除"} ${place.name}">${isPendingDelete ? "確認刪除" : "刪除"}</button>`;
   const metaParts = [place.type, place.id.startsWith("custom-") ? "" : place.area].filter(Boolean);
 
   return `
@@ -1246,6 +1287,17 @@ function renderTodayMap(plannedPlaces) {
 
   const directionsUrl = googleMapsDirectionsUrl(plannedPlaces);
   const embedUrl = googleMapsEmbedDirectionsUrl(plannedPlaces);
+
+  if (!directionsUrl) {
+    return `
+      <article class="card map-card">
+        <div class="status-row">
+          <h3>路線</h3>
+        </div>
+        <p>部分自訂地點只有短連結，無法穩定串成路線。請先用行程卡上的地圖開啟單點。</p>
+      </article>
+    `;
+  }
 
   if (!embedUrl) {
     return `
@@ -1789,7 +1841,14 @@ function bindTabEvents() {
 
   document.querySelectorAll("[data-delete-place]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await deleteCandidatePlace(button.dataset.deletePlace);
+      const placeId = button.dataset.deletePlace;
+      if (state.pendingDeletePlaceId !== placeId) {
+        state.pendingDeletePlaceId = placeId;
+        renderActiveTab();
+        return;
+      }
+      await deleteCandidatePlace(placeId);
+      state.pendingDeletePlaceId = null;
       renderTravelerStatus();
       renderActiveTab();
     });
@@ -1860,10 +1919,11 @@ async function handleGooglePlaceLinkSubmit(event) {
 
   const customPlaces = readCustomPlaces();
   const placeName = typedPlaceName || nameFromGoogleMapsLink(mapsLink) || `Google Maps 地點 ${customPlaces.length + 1}`;
+  const directionsQuery = googleMapsQueryFromUrl(mapsLink);
   const newPlace = {
     id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: placeName,
-    directionsQuery: `${placeName}, Bangkok, Thailand`,
+    directionsQuery,
     type: "自訂",
     area: "Google Maps",
     period: "afternoon",
@@ -1871,7 +1931,7 @@ async function handleGooglePlaceLinkSubmit(event) {
     cost: 0,
     priority: "自訂",
     status: "候補",
-    mapQuery: `${placeName}, Bangkok, Thailand`,
+    mapQuery: mapsLink,
     sourceMapUrl: mapsLink,
     note: "從 Google Maps 連結加入候補。",
   };

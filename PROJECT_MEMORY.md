@@ -171,6 +171,11 @@
   - 已把 Firebase 現有自訂地點的短連結解析成完整地址，包含醫院對面、廊曼國際機場、旅館
   - 行程頁每張卡的「地圖」按鈕也改用 `directionsQuery` 產生乾淨 Google Maps search URL，不再直接開短連結或複雜 Maps URL
   - 新增自訂地點時，原始 Google Maps 連結保存到 `sourceMapUrl`，`mapQuery` 改存地點名稱搜尋文字，降低 Google Maps Web 版解析錯誤
+- 2026-07-05 自訂地點導航修正：
+  - 自訂地點的顯示名稱只作為畫面文字，不再自動變成 `${name}, Bangkok, Thailand` 導航查詢
+  - 自訂地點的「地圖」按鈕優先開原始 Google Maps 連結 `sourceMapUrl`
+  - 今日路線會優先從 Google Maps 連結解析座標、`query`、`q` 或 `/place/` 內容；無法解析時不硬塞自訂名稱，避免 Google Maps 找不到
+  - 候補總覽刪除鍵改成二段式確認：第一次顯示「確認刪除」，第二次才同步刪除，避免手機誤觸
 
 ## Firebase 設定
 

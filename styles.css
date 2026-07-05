@@ -734,6 +734,11 @@ input:focus-visible {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.compact-action.delete.is-confirming {
+  color: #fff;
+  background: var(--red);
+}
+
 .compact-actions a {
   color: #f7f3e8;
   background: rgba(50, 216, 255, 0.12);
@@ -1848,6 +1853,11 @@ input:focus-visible {
 .compact-action.delete {
   color: #b91c1c;
   background: rgba(239, 68, 68, 0.1);
+}
+
+.compact-action.delete.is-confirming {
+  color: #fff;
+  background: var(--red);
 }
 
 .secondary-button,
