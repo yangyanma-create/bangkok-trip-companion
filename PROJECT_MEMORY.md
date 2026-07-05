@@ -165,6 +165,10 @@
   - 今日只有 1 個行程地點時，路線卡改成「開啟地點位置」，2 個以上才產生今日路線
   - Firebase `dailyRoleDraws` 已清空，正式上架後 7/5 到 7/10 全部回到未抽狀態
   - 角色同步回來時只刷新旅伴狀態與目前頁面，不再整個 app 重跑，避免看起來像所有日期一起重抽
+- 2026-07-05 今日路線短連結修正：
+  - 自訂地點新增 `directionsQuery`，今日路線優先使用這個欄位，不再把 `maps.app.goo.gl` 短連結塞進 Google Maps directions
+  - 若 `mapQuery` 是完整 Google Maps URL，會嘗試讀取 URL 裡的 `q` 或 `query` 作為路線地址
+  - 已把 Firebase 現有自訂地點的短連結解析成完整地址，包含醫院對面、廊曼國際機場、旅館
 
 ## Firebase 設定
 

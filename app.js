@@ -539,8 +539,17 @@ function getPlaceMapQuery(place) {
 }
 
 function getPlaceDirectionsQuery(place) {
+  if (place.directionsQuery) return place.directionsQuery;
+
   const mapQuery = getPlaceMapQuery(place);
   if (/^https?:\/\//.test(mapQuery)) {
+    try {
+      const url = new URL(mapQuery);
+      const query = url.searchParams.get("q") || url.searchParams.get("query");
+      if (query) return query;
+    } catch {
+      return `${place.name}, Bangkok, Thailand`;
+    }
     return `${place.name}, Bangkok, Thailand`;
   }
   return mapQuery;
@@ -1850,6 +1859,7 @@ async function handleGooglePlaceLinkSubmit(event) {
   const newPlace = {
     id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: placeName,
+    directionsQuery: `${placeName}, Bangkok, Thailand`,
     type: "自訂",
     area: "Google Maps",
     period: "afternoon",
