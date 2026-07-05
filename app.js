@@ -538,6 +538,14 @@ function getPlaceMapQuery(place) {
   return place.mapQuery || `${place.name}, Bangkok, Thailand`;
 }
 
+function getPlaceDirectionsQuery(place) {
+  const mapQuery = getPlaceMapQuery(place);
+  if (/^https?:\/\//.test(mapQuery)) {
+    return `${place.name}, Bangkok, Thailand`;
+  }
+  return mapQuery;
+}
+
 function googleMapsSearchUrl(place) {
   const mapQuery = getPlaceMapQuery(place);
   if (/^https?:\/\//.test(mapQuery)) return mapQuery;
@@ -556,11 +564,11 @@ function googleMapsDirectionsUrl(routePlaces) {
   const validPlaces = routePlaces.filter(Boolean);
   if (validPlaces.length < 2) return "";
 
-  const origin = encodeURIComponent(getPlaceMapQuery(validPlaces[0]));
-  const destination = encodeURIComponent(getPlaceMapQuery(validPlaces[validPlaces.length - 1]));
+  const origin = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[0]));
+  const destination = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[validPlaces.length - 1]));
   const waypoints = validPlaces
     .slice(1, -1)
-    .map(getPlaceMapQuery)
+    .map(getPlaceDirectionsQuery)
     .map(encodeURIComponent)
     .join("|");
   const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
@@ -572,11 +580,11 @@ function googleMapsEmbedDirectionsUrl(routePlaces) {
   const validPlaces = routePlaces.filter(Boolean);
   if (!GOOGLE_MAPS_EMBED_API_KEY || validPlaces.length < 2) return "";
 
-  const origin = encodeURIComponent(getPlaceMapQuery(validPlaces[0]));
-  const destination = encodeURIComponent(getPlaceMapQuery(validPlaces[validPlaces.length - 1]));
+  const origin = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[0]));
+  const destination = encodeURIComponent(getPlaceDirectionsQuery(validPlaces[validPlaces.length - 1]));
   const waypoints = validPlaces
     .slice(1, -1)
-    .map(getPlaceMapQuery)
+    .map(getPlaceDirectionsQuery)
     .map(encodeURIComponent)
     .join("|");
   const waypointParam = waypoints ? `&waypoints=${waypoints}` : "";
@@ -1052,7 +1060,13 @@ async function setupSync() {
     onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/dailyRoleDraws`), (snapshot) => {
       state.syncedDailyRoleDraws = snapshot.val() || {};
       localStorage.setItem(STORAGE_KEYS.dailyRoleDraws, JSON.stringify(state.syncedDailyRoleDraws));
-      render();
+      if (state.travelerId) {
+        renderTravelerStatus();
+        renderActiveTab();
+      } else {
+        renderSyncBanner();
+        renderTravelerDraw();
+      }
     });
 
     onValue(ref(sync.database, `rooms/${SYNC_ROOM_ID}/itineraryOverrides`), (snapshot) => {
@@ -1191,14 +1205,28 @@ function placeToneClass(place) {
 }
 
 function renderTodayMap(plannedPlaces) {
-  if (plannedPlaces.length < 2) {
+  if (!plannedPlaces.length) {
     return `
       <article class="card map-card">
         <div class="status-row">
           <h3>路線</h3>
           <span class="pill blue">Google Maps</span>
         </div>
-        <p>2 個地點後產生路線。</p>
+        <p>今天還沒有行程地點。</p>
+      </article>
+    `;
+  }
+
+  if (plannedPlaces.length === 1) {
+    const place = plannedPlaces[0];
+    return `
+      <article class="card map-card">
+        <div class="status-row">
+          <h3>路線</h3>
+          <span class="pill blue">Google Maps</span>
+        </div>
+        <p>目前只有 1 個地點，先開啟地點位置。</p>
+        <a class="map-button" href="${googleMapsSearchUrl(place)}" target="_blank" rel="noopener">開啟 ${place.name}</a>
       </article>
     `;
   }
