@@ -557,12 +557,16 @@ function getPlaceDirectionsQuery(place) {
 
 function googleMapsSearchUrl(place) {
   const mapQuery = getPlaceMapQuery(place);
+  const searchQuery = getPlaceDirectionsQuery(place);
+  if (searchQuery && !/^https?:\/\//.test(searchQuery)) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(searchQuery)}`;
+  }
   if (/^https?:\/\//.test(mapQuery)) return mapQuery;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 }
 
 function googleMapsNearbySearchUrl(place, keyword) {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${keyword} near ${getPlaceMapQuery(place)}`)}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${keyword} near ${getPlaceDirectionsQuery(place)}`)}`;
 }
 
 function googleMapsNearMeUrl(keyword) {
@@ -1867,7 +1871,8 @@ async function handleGooglePlaceLinkSubmit(event) {
     cost: 0,
     priority: "自訂",
     status: "候補",
-    mapQuery: mapsLink,
+    mapQuery: `${placeName}, Bangkok, Thailand`,
+    sourceMapUrl: mapsLink,
     note: "從 Google Maps 連結加入候補。",
   };
 

@@ -169,6 +169,8 @@
   - 自訂地點新增 `directionsQuery`，今日路線優先使用這個欄位，不再把 `maps.app.goo.gl` 短連結塞進 Google Maps directions
   - 若 `mapQuery` 是完整 Google Maps URL，會嘗試讀取 URL 裡的 `q` 或 `query` 作為路線地址
   - 已把 Firebase 現有自訂地點的短連結解析成完整地址，包含醫院對面、廊曼國際機場、旅館
+  - 行程頁每張卡的「地圖」按鈕也改用 `directionsQuery` 產生乾淨 Google Maps search URL，不再直接開短連結或複雜 Maps URL
+  - 新增自訂地點時，原始 Google Maps 連結保存到 `sourceMapUrl`，`mapQuery` 改存地點名稱搜尋文字，降低 Google Maps Web 版解析錯誤
 
 ## Firebase 設定
 
